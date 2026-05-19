@@ -1,9 +1,9 @@
 use super::*;
 use crate::services::config_manager::ConfigManager;
 use crate::ui_regression_test_support::{
-    CssProviderGuard, find_descendant_with_class, flush_gtk, init_gtk_or_skip,
-    init_layer_shell_or_skip, label_with_text, registered_test_app,
-    run_ignored_contract_subprocess,
+    CssProviderGuard, Rgba8, assert_pixel_close, find_descendant_with_class, flush_gtk,
+    init_gtk_or_skip, init_layer_shell_or_skip, label_with_text, registered_test_app,
+    run_ignored_contract_subprocess, sample_widget_pixel,
 };
 use std::rc::Rc;
 use vibepanel_core::Config;
@@ -116,6 +116,144 @@ fn run_test_notification_toast_structure() {
     flush_gtk();
 }
 
+fn configure_toast_pixel_test(config: &Config) -> CssProviderGuard {
+    ConfigManager::replace_global_for_test(config.clone());
+    let css_provider = CssProviderGuard::for_config(config, gtk4::STYLE_PROVIDER_PRIORITY_USER);
+    let palette = ConfigManager::global().palette();
+    SurfaceStyleManager::global().reconfigure(
+        palette.surface_styles(),
+        config.advanced.pango_font_rendering,
+    );
+    css_provider
+}
+
+fn toast_pixel_config(background_color: &str) -> Config {
+    let mut config = Config::default();
+    config.theme.mode = "dark".to_string();
+    config.widgets.background_color = Some(background_color.to_string());
+    config.widgets.background_opacity = 0.0;
+    config.widgets.popover_background_opacity = Some(1.0);
+    config
+}
+
+fn blank_notification() -> Notification {
+    Notification {
+        app_name: String::new(),
+        summary: String::new(),
+        body: String::new(),
+        ..test_notification(crate::services::notification::URGENCY_NORMAL)
+    }
+}
+
+fn toast_surface_fixture(
+    config: &Config,
+    override_css: Option<&str>,
+) -> (
+    gtk4::Window,
+    CssProviderGuard,
+    Option<CssProviderGuard>,
+    gtk4::Widget,
+) {
+    let css_provider = configure_toast_pixel_test(config);
+    let override_css_provider = override_css
+        .map(|css| CssProviderGuard::new(css, gtk4::STYLE_PROVIDER_PRIORITY_USER + 100));
+    let window = gtk4::Window::builder()
+        .title("vibepanel toast pixel UI regression test")
+        .default_width(220)
+        .default_height(120)
+        .build();
+    let notification = blank_notification();
+    let noop_dismiss: ToastCallback = Rc::new(|_| {});
+    let noop_action: ToastActionCallback = Rc::new(|_, _| {});
+    let surface = build_toast_content(&notification, noop_dismiss, noop_action, &window);
+    surface.set_size_request(180, 80);
+    window.set_child(Some(&surface));
+    window.present();
+    flush_gtk();
+
+    (
+        window,
+        css_provider,
+        override_css_provider,
+        surface.upcast(),
+    )
+}
+
+fn center_pixel_of_toast(window: &gtk4::Window, surface: &gtk4::Widget) -> Rgba8 {
+    sample_widget_pixel(window, surface, surface.width() / 2, surface.height() / 2)
+}
+
+fn edge_pixel_of_toast(window: &gtk4::Window, surface: &gtk4::Widget) -> Rgba8 {
+    sample_widget_pixel(window, surface, 1, surface.height() / 2)
+}
+
+fn run_test_notification_toast_surface_pixels() {
+    if !init_gtk_or_skip(
+        "notification toast pixel UI regression test",
+        Some("VIBEPANEL_UI_REGRESSION_REQUIRED"),
+    ) {
+        return;
+    }
+
+    let background_color = "#445566";
+    let outline_color = "#80a0c0";
+    let mut config = toast_pixel_config(background_color);
+    config.theme.outline = true;
+    config.theme.outline_width = 4;
+    config.theme.outline_color = outline_color.to_string();
+    config.theme.outline_opacity = 0.5;
+
+    let (window, _css_provider, _override_css_provider, surface) =
+        toast_surface_fixture(&config, None);
+    // Baseline for replacing SurfaceStyleManager with static surface CSS.
+    assert_pixel_close(
+        center_pixel_of_toast(&window, &surface),
+        Rgba8::from_hex(background_color),
+        "production toast surface should use popover opacity, not transparent widget opacity",
+    );
+    assert_pixel_close(
+        edge_pixel_of_toast(&window, &surface),
+        Rgba8::from_hex(outline_color)
+            .with_alpha(128)
+            .over(Rgba8::from_hex(background_color)),
+        "production toast surface should render configured surface outline color and opacity",
+    );
+
+    window.close();
+    flush_gtk();
+}
+
+fn run_test_notification_toast_user_css_outline_pixel() {
+    if !init_gtk_or_skip(
+        "notification toast pixel UI regression test",
+        Some("VIBEPANEL_UI_REGRESSION_REQUIRED"),
+    ) {
+        return;
+    }
+
+    let background_color = "#101820";
+    let css_color = "#00ff00";
+    let mut config = toast_pixel_config(background_color);
+    config.theme.outline = true;
+    config.theme.outline_width = 4;
+    config.theme.outline_color = "accent".to_string();
+    config.theme.outline_opacity = 1.0;
+    config.theme.accent = Some("#224466".to_string());
+
+    let user_css = format!(".notification-toast {{ --surface-outline-color: {css_color}; }}");
+    let (window, _css_provider, _override_css_provider, surface) =
+        toast_surface_fixture(&config, Some(&user_css));
+
+    assert_pixel_close(
+        edge_pixel_of_toast(&window, &surface),
+        Rgba8::from_hex(css_color),
+        "user CSS should override production toast surface outline color",
+    );
+
+    window.close();
+    flush_gtk();
+}
+
 #[test]
 #[ignore = "notification toast structure contract: requires a Wayland compositor with layer-shell support"]
 fn test_notification_toast_structure_contract() {
@@ -216,10 +354,24 @@ fn test_ui_regression_notification_toast_structure() {
 }
 
 #[test]
+#[ignore = "UI regression test: opens GTK windows; run under Xvfb"]
+fn test_ui_regression_notification_toast_surface_pixels() {
+    run_toast_ui_regression_subprocess("toast.surface_pixels");
+}
+
+#[test]
+#[ignore = "UI regression test: opens GTK windows; run under Xvfb"]
+fn test_ui_regression_notification_toast_user_css_outline_pixel() {
+    run_toast_ui_regression_subprocess("toast.user_css_outline_pixel");
+}
+
+#[test]
 #[ignore = "internal runner for one notification toast UI regression subprocess"]
 fn notification_toast_ui_regression_runner() {
     match std::env::var("VIBEPANEL_NOTIFICATION_TOAST_UI_REGRESSION_TEST").as_deref() {
         Ok("toast.structure") => run_test_notification_toast_structure(),
+        Ok("toast.surface_pixels") => run_test_notification_toast_surface_pixels(),
+        Ok("toast.user_css_outline_pixel") => run_test_notification_toast_user_css_outline_pixel(),
         Ok(other) => panic!("unknown notification toast UI regression test: {other}"),
         Err(_) => {
             eprintln!("skipping notification toast UI regression test: no test case selected")

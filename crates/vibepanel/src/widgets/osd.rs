@@ -66,6 +66,11 @@ pub struct OsdWidget {
     unavailable_label: Label,
 }
 
+struct OsdContent {
+    container: GtkBox,
+    osd_widget: OsdWidget,
+}
+
 impl OsdWidget {
     pub fn new(orientation: Orientation, icon_size: i32, show_value: bool) -> Self {
         let root = GtkBox::new(Orientation::Vertical, 0);
@@ -180,6 +185,32 @@ impl OsdWidget {
     }
 }
 
+fn build_osd_content(orientation: Orientation, show_value: bool) -> OsdContent {
+    let container = GtkBox::new(Orientation::Vertical, 0);
+    container.add_css_class(osd::CONTAINER);
+    container.add_css_class(osd::OSD);
+    if orientation == Orientation::Vertical {
+        container.add_css_class(osd::VERTICAL);
+    } else {
+        container.add_css_class(osd::HORIZONTAL);
+    }
+
+    SurfaceStyleManager::global().apply_surface_styles_with_radius(
+        &container,
+        false,
+        "var(--radius-widget-lg)",
+    );
+
+    let osd_widget = OsdWidget::new(orientation, 24, show_value);
+    container.append(osd_widget.widget());
+    SurfaceStyleManager::global().apply_pango_attrs_all(&container);
+
+    OsdContent {
+        container,
+        osd_widget,
+    }
+}
+
 /// Overlay window for displaying the OSD.
 ///
 /// Uses layer-shell to create a floating overlay that:
@@ -236,32 +267,8 @@ impl OsdOverlay {
             Orientation::Horizontal
         };
 
-        // Content container with surface styling.
-        let container = GtkBox::new(Orientation::Vertical, 0);
-        container.add_css_class(osd::CONTAINER);
-        container.add_css_class(osd::OSD);
-        if is_vertical {
-            container.add_css_class(osd::VERTICAL);
-        } else {
-            container.add_css_class(osd::HORIZONTAL);
-        }
-
-        // Apply theme surface styles with larger widget radius for pill shape at max radius.
-        SurfaceStyleManager::global().apply_surface_styles_with_radius(
-            &container,
-            false,
-            "var(--radius-widget-lg)",
-        );
-
-        // Child OSD widget.
-        let osd_widget = OsdWidget::new(orientation, 24, osd_config.show_value);
-        container.append(osd_widget.widget());
-        window.set_child(Some(&container));
-
-        // Apply Pango font attributes to all labels if enabled in config.
-        // This is the central hook for OSD - widgets create standard
-        // GTK labels, and we apply Pango attributes here after the tree is built.
-        SurfaceStyleManager::global().apply_pango_attrs_all(&container);
+        let content = build_osd_content(orientation, osd_config.show_value);
+        window.set_child(Some(&content.container));
 
         // Anchor window according to position.
         Self::apply_position(&window, &position);
@@ -277,7 +284,7 @@ impl OsdOverlay {
 
         let overlay = Rc::new(Self {
             window,
-            osd_widget,
+            osd_widget: content.osd_widget,
             timeout_ms,
             hide_source: RefCell::new(None),
             brightness_baseline_seen: Cell::new(false),
@@ -569,6 +576,10 @@ impl OsdOverlay {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "osd_tests.rs"]
+mod tests;
 
 impl Drop for OsdOverlay {
     fn drop(&mut self) {
