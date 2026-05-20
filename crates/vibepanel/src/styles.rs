@@ -81,6 +81,24 @@ pub mod class {
     /// Main bar class (`.bar`).
     pub const BAR: &str = "bar";
 
+    /// Horizontal bar orientation (`.bar--horizontal`).
+    pub const BAR_HORIZONTAL: &str = "bar--horizontal";
+
+    /// Vertical bar orientation (`.bar--vertical`).
+    pub const BAR_VERTICAL: &str = "bar--vertical";
+
+    /// Top bar position (`.bar--top`).
+    pub const BAR_TOP: &str = "bar--top";
+
+    /// Bottom bar position (`.bar--bottom`).
+    pub const BAR_BOTTOM: &str = "bar--bottom";
+
+    /// Left bar position (`.bar--left`).
+    pub const BAR_LEFT: &str = "bar--left";
+
+    /// Right bar position (`.bar--right`).
+    pub const BAR_RIGHT: &str = "bar--right";
+
     /// Sectioned bar widget CSS name (`sectioned-bar`).
     pub const SECTIONED_BAR: &str = "sectioned-bar";
 

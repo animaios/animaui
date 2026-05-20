@@ -31,7 +31,7 @@ use std::collections::HashSet;
 use tracing::{debug, error, info, warn};
 
 use vibepanel_core::theme::{BORDER_OPACITY_DARK, BORDER_OPACITY_GTK, BORDER_OPACITY_LIGHT};
-use vibepanel_core::{Config, ThemePalette, ThemeSizes};
+use vibepanel_core::{Config, ThemePalette, ThemeSizes, config::BarPosition};
 
 use super::callbacks::{CallbackId, Callbacks};
 use super::wallpaper::{detect_wallpaper, extract_theme_from_image, theme_from_source_color};
@@ -427,8 +427,8 @@ impl ConfigManager {
         self.config.borrow().bar.background_opacity
     }
 
-    pub fn bar_is_bottom(&self) -> bool {
-        self.config.borrow().bar.is_bottom()
+    pub fn bar_position(&self) -> BarPosition {
+        self.config.borrow().bar.position()
     }
 
     /// Whether UI animations are enabled (CSS transitions, revealer
@@ -1313,6 +1313,14 @@ mod tests {
         let mut new = old.clone();
         new.widgets.popover_background_opacity = Some(0.9);
         assert!(config_theme_changed(&old, &new));
+
+        let mut new = old.clone();
+        new.bar.position = "right".to_string();
+        assert!(config_theme_changed(&old, &new));
+
+        let mut new = old.clone();
+        new.bar.padding = old.bar.padding + 1;
+        assert!(config_theme_changed(&old, &new));
     }
 
     #[test]
@@ -1332,7 +1340,7 @@ mod tests {
 
     #[test]
     fn test_config_theme_changed_detects_bar_padding_tokens() {
-        // bar.padding feeds the cached ThemePalette's --bar-padding-y tokens.
+        // bar.padding feeds the cached ThemePalette's internal bar padding tokens.
         // Without a theme reload, a structural rebuild can resize the layer-shell
         // window while CSS still applies the old screen-edge padding until restart.
         let old = Config::default();
