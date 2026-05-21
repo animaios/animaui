@@ -113,7 +113,7 @@ impl VpnKeyboardState {
         let mut should_restore = false;
 
         // Check pending connects
-        if !self.pending_connects.is_empty() && self.keyboard_released {
+        if !self.pending_connects.is_empty() {
             let mut resolved = Vec::new();
 
             for uuid in &self.pending_connects {
@@ -122,11 +122,11 @@ impl VpnKeyboardState {
                         VpnState::Activated => {
                             resolved.push(uuid.clone());
                             connect_completed = true;
-                            should_restore = true;
+                            should_restore |= self.keyboard_released;
                         }
                         VpnState::Deactivated | VpnState::Unknown => {
                             resolved.push(uuid.clone());
-                            should_restore = true;
+                            should_restore |= self.keyboard_released;
                         }
                         VpnState::Activating | VpnState::Deactivating => {
                             // Still in progress, keep waiting
@@ -135,7 +135,7 @@ impl VpnKeyboardState {
                 } else {
                     // Connection no longer in snapshot (failed/cancelled)
                     resolved.push(uuid.clone());
-                    should_restore = true;
+                    should_restore |= self.keyboard_released;
                 }
             }
 
@@ -771,4 +771,57 @@ fn on_vpn_auth_connect_clicked(state: &Rc<VpnCardState>) {
 
     VpnService::global().submit_vpn_secrets(&secrets);
     hide_vpn_auth_dialog(state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::vpn::VpnState;
+
+    fn test_snapshot(uuid: &str, state: VpnState) -> VpnSnapshot {
+        VpnSnapshot {
+            available: true,
+            connections: vec![VpnConnection {
+                uuid: uuid.to_string(),
+                name: "Test VPN".to_string(),
+                active: state == VpnState::Activated,
+                state,
+                autoconnect: false,
+                vpn_type: "wireguard".to_string(),
+            }],
+            any_active: state == VpnState::Activated,
+            active_count: if state == VpnState::Activated { 1 } else { 0 },
+            is_ready: true,
+            preferred_uuid: None,
+            auth_request: None,
+            legacy_auth_dialog_active: false,
+        }
+    }
+
+    #[test]
+    fn pending_connect_completes_without_keyboard_release() {
+        let mut state = VpnKeyboardState::new();
+        state.begin_connect("vpn-1");
+
+        let (connect_completed, should_restore) =
+            state.check_pending(&test_snapshot("vpn-1", VpnState::Activated));
+
+        assert!(connect_completed);
+        assert!(!should_restore);
+        assert!(state.pending_connects.is_empty());
+    }
+
+    #[test]
+    fn pending_connect_completes_and_restores_after_keyboard_release() {
+        let mut state = VpnKeyboardState::new();
+        state.begin_connect("vpn-1");
+        state.keyboard_released = true;
+
+        let (connect_completed, should_restore) =
+            state.check_pending(&test_snapshot("vpn-1", VpnState::Activated));
+
+        assert!(connect_completed);
+        assert!(should_restore);
+        assert!(state.pending_connects.is_empty());
+    }
 }
