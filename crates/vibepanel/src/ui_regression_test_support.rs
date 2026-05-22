@@ -197,16 +197,14 @@ impl Rgba8 {
         }
     }
 
-    pub(crate) fn over(self, background: Self) -> Self {
+    pub(crate) fn premultiply_alpha(self) -> Self {
         let alpha = f64::from(self.a) / 255.0;
-        let blend = |foreground: u8, background: u8| -> u8 {
-            (f64::from(foreground) * alpha + f64::from(background) * (1.0 - alpha)).round() as u8
-        };
+        let premultiply = |channel: u8| -> u8 { (f64::from(channel) * alpha).round() as u8 };
         Self {
-            r: blend(self.r, background.r),
-            g: blend(self.g, background.g),
-            b: blend(self.b, background.b),
-            a: 255,
+            r: premultiply(self.r),
+            g: premultiply(self.g),
+            b: premultiply(self.b),
+            ..self
         }
     }
 

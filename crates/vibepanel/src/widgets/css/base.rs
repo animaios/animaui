@@ -238,6 +238,7 @@ label link:active {{
 .popover {{
     background-color: {popover_bg};
     background-image: none;
+    background-clip: padding-box;
     border: var(--surface-outline-width) solid color-mix(in srgb, var(--surface-outline-color) var(--surface-outline-opacity), transparent);
     border-radius: var(--radius-surface);
     box-shadow: var(--shadow-soft);
@@ -252,6 +253,7 @@ window.media-window > .media-content,
 .osd {{
     background-color: {popover_bg};
     background-image: none;
+    background-clip: padding-box;
     border: var(--surface-outline-width) solid color-mix(in srgb, var(--surface-outline-color) var(--surface-outline-opacity), transparent);
     border-radius: var(--radius-surface);
     box-shadow: var(--shadow-soft);

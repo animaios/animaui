@@ -219,7 +219,7 @@ fn run_test_notification_toast_surface_pixels() {
         edge_pixel_of_toast(&window, &surface),
         Rgba8::from_hex(outline_color)
             .with_alpha(128)
-            .over(Rgba8::from_hex(background_color)),
+            .premultiply_alpha(),
         "production toast surface should render configured surface outline color and opacity",
     );
 

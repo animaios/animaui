@@ -266,6 +266,10 @@ fn assert_bar_style_bindings(config: &Config, bar: &SectionedBar) {
         "production bar CSS should apply --color-background-bar to sectioned-bar.bar"
     );
     assert!(
+        declarations.contains("background-clip: padding-box;"),
+        "production bar CSS should keep the background inside the outline"
+    );
+    assert!(
         declarations.contains("border-radius: var(--radius-bar);"),
         "production bar CSS should apply --radius-bar to sectioned-bar.bar"
     );
@@ -297,6 +301,10 @@ fn assert_widget_style_bindings(config: &Config) {
         "production widget CSS should apply --widget-background-color and --widget-background-opacity to .widget"
     );
     assert!(
+        declarations.contains("background-clip: padding-box;"),
+        "production widget CSS should keep the background inside the outline"
+    );
+    assert!(
         declarations.contains("border-radius: var(--radius-widget);"),
         "production widget CSS should apply --radius-widget to .widget"
     );
@@ -326,6 +334,10 @@ fn assert_popover_style_bindings(config: &Config) {
     assert!(
         declarations.contains(&format!("background-color: {POPOVER_BG_WITH_OPACITY};")),
         "production popover CSS should apply --widget-background-color and --popover-background-opacity to .popover"
+    );
+    assert!(
+        declarations.contains("background-clip: padding-box;"),
+        "production popover CSS should keep the background inside the outline"
     );
     assert!(
         declarations.contains("border: var(--surface-outline-width) solid"),
@@ -1365,7 +1377,7 @@ fn run_test_outline_color_pixels() {
 
         let palette = vibepanel_core::ThemePalette::from_config(&config, None, None);
         let expected = outline_color_for_palette(&palette, color, config.theme.outline_opacity)
-            .over(Rgba8::from_hex("#101820"));
+            .premultiply_alpha();
         let fixture = painted_bar_fixture(&config);
         let rendered = edge_pixel_of(&fixture, &fixture.first_surface);
 
@@ -1396,7 +1408,7 @@ fn run_test_outline_opacity_and_disabled_pixels() {
         transparent_edge,
         Rgba8::from_hex("#80a0c0")
             .with_alpha(128)
-            .over(Rgba8::from_hex("#101820")),
+            .premultiply_alpha(),
         "theme.outline_opacity should control the rendered border pixel alpha",
     );
     maybe_hold_probe_window();
@@ -1514,7 +1526,7 @@ fn run_test_surface_outline_css_gsk_parity() {
     let css_edge = edge_pixel_of_surface(&surface_fixture);
     let gsk_rgba = crate::services::config_manager::ConfigManager::global()
         .surface_outline_rgba_for_widget("custom-a", &surface_fixture.surface);
-    let gsk_edge = Rgba8::from_gdk(gsk_rgba).over(Rgba8::from_hex("#101820"));
+    let gsk_edge = Rgba8::from_gdk(gsk_rgba).premultiply_alpha();
 
     assert_pixel_close(
         css_edge,

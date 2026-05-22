@@ -65,6 +65,7 @@ sectioned-bar.bar {{
     padding-bottom: var(--bar-padding-bottom, var(--bar-padding-y, var(--vp-internal-bar-padding-bottom)));
     padding-left: var(--bar-padding-left, var(--bar-padding-x, var(--vp-internal-bar-padding-left)));
     background: var(--color-background-bar);
+    background-clip: padding-box;
     border: var(--bar-outline-width) solid color-mix(in srgb, var(--bar-outline-color) var(--bar-outline-opacity), transparent);
     border-radius: var(--radius-bar);
     font-family: var(--font-family);
@@ -86,6 +87,7 @@ sectioned-bar.bar.bar--vertical {{
 /* Widget — visual surface */
 .widget {{
     background-color: {widget_bg};
+    background-clip: padding-box;
     border: var(--widget-outline-width) solid color-mix(in srgb, var(--widget-outline-color) var(--widget-outline-opacity), transparent);
     border-radius: var(--radius-widget);
 }}
