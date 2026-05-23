@@ -90,6 +90,7 @@ window.layer-shell-click-catcher {{
 .bar.bar--horizontal .material-symbol-battery_charging_50,
 .bar.bar--horizontal .material-symbol-battery_charging_30,
 .bar.bar--horizontal .material-symbol-battery_charging_20,
+.bar.bar--horizontal .material-symbol-notifications,
 .bar.bar--horizontal .material-symbol-keyboard_arrow_up,
 .bar.bar--horizontal .material-symbol-keyboard_arrow_down {{
     margin-right: -0.2em;
