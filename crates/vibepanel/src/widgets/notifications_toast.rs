@@ -1,13 +1,12 @@
 //! Notification toast windows for displaying new notifications.
 //!
 //! This module handles floating toast windows that appear when new notifications
-//! arrive. Toasts stack vertically on the bar-adjacent edge (top-right when bar
-//! is at top, bottom-right when bar is at bottom) and auto-dismiss after a
-//! timeout (except for critical notifications).
+//! arrive. Toasts stack vertically from the configured screen edge and
+//! auto-dismiss after a timeout (except for critical notifications).
 
 use gtk4::glib::{self, SourceId};
 use gtk4::prelude::*;
-use gtk4::{Align, Application, Box as GtkBox, Button, Image, Label, Orientation, Window};
+use gtk4::{Align, Application, Box as GtkBox, Button, Image, Label, Orientation, Window, gdk};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -17,7 +16,6 @@ use tracing::debug;
 use crate::services::notification::{
     Notification, NotificationService, URGENCY_CRITICAL, URGENCY_LOW,
 };
-use vibepanel_core::config::BarPosition;
 
 /// Type alias for toast notification callbacks.
 type ToastCallback = Rc<dyn Fn(u32)>;
@@ -29,10 +27,90 @@ use crate::services::surfaces::SurfaceStyleManager;
 use crate::styles::{button, color, notification as notif};
 
 use super::notifications_common::{
-    POPOVER_WIDTH, SURFACE_SHADOW_MARGIN, TOAST_BAR_MARGIN, TOAST_ESTIMATED_HEIGHT, TOAST_GAP,
-    TOAST_MARGIN_RIGHT, TOAST_TIMEOUT_CRITICAL_MS, TOAST_TIMEOUT_MS,
+    POPOVER_WIDTH, SURFACE_SHADOW_MARGIN, TOAST_EDGE_MARGIN, TOAST_ESTIMATED_HEIGHT, TOAST_GAP,
+    TOAST_SIDE_MARGIN, TOAST_TIMEOUT_CRITICAL_MS, TOAST_TIMEOUT_MS,
     create_notification_image_widget, sanitize_body_markup,
 };
+
+/// Configurable screen position for notification toasts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum ToastPosition {
+    #[default]
+    TopRight,
+    TopCenter,
+    TopLeft,
+    BottomRight,
+    BottomCenter,
+    BottomLeft,
+}
+
+impl ToastPosition {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "top-right" => Some(Self::TopRight),
+            "top-center" => Some(Self::TopCenter),
+            "top-left" => Some(Self::TopLeft),
+            "bottom-right" => Some(Self::BottomRight),
+            "bottom-center" => Some(Self::BottomCenter),
+            "bottom-left" => Some(Self::BottomLeft),
+            _ => None,
+        }
+    }
+
+    fn vertical_edge(self) -> Edge {
+        match self {
+            Self::TopRight | Self::TopCenter | Self::TopLeft => Edge::Top,
+            Self::BottomRight | Self::BottomCenter | Self::BottomLeft => Edge::Bottom,
+        }
+    }
+
+    fn horizontal_edge(self) -> Option<Edge> {
+        match self {
+            Self::TopRight | Self::BottomRight => Some(Edge::Right),
+            Self::TopLeft | Self::BottomLeft => Some(Edge::Left),
+            Self::TopCenter | Self::BottomCenter => None,
+        }
+    }
+
+    fn is_centered(self) -> bool {
+        matches!(self, Self::TopCenter | Self::BottomCenter)
+    }
+}
+
+fn calculate_center_margin(monitor_width: i32, window_width: i32) -> i32 {
+    ((monitor_width - window_width) / 2).max(0)
+}
+
+fn toast_horizontal_layout(
+    position: ToastPosition,
+    monitor_width: Option<i32>,
+    side_margin: i32,
+) -> (Option<Edge>, i32) {
+    if position.is_centered() {
+        return monitor_width
+            .map(|width| {
+                (
+                    Some(Edge::Left),
+                    calculate_center_margin(width, POPOVER_WIDTH),
+                )
+            })
+            .unwrap_or((None, 0));
+    }
+
+    (position.horizontal_edge(), side_margin)
+}
+
+struct ToastWindowContext<'a> {
+    app: &'a Application,
+    monitor: Option<&'a gdk::Monitor>,
+    layout: ToastLayout,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ToastLayout {
+    position: ToastPosition,
+    initial_margin: i32,
+}
 
 /// Floating toast window for displaying a single notification.
 pub(super) struct NotificationToast {
@@ -52,17 +130,16 @@ impl NotificationToast {
     const ANIMATION_DURATION_MS: i32 = 150;
     const ANIMATION_STEP_MS: u32 = 16; // ~60fps
 
-    pub fn new(
-        app: &Application,
+    fn new(
+        context: ToastWindowContext<'_>,
         notification: &Notification,
         on_dismiss: ToastCallback,
         on_action: ToastActionCallback,
         on_timeout: ToastCallback,
         on_height_measured: ToastCallback,
-        initial_margin: i32,
     ) -> Rc<Self> {
         let window = Window::builder()
-            .application(app)
+            .application(context.app)
             .decorated(false)
             .resizable(false)
             .default_width(POPOVER_WIDTH)
@@ -70,9 +147,8 @@ impl NotificationToast {
 
         window.add_css_class(notif::TOAST_WRAPPER);
 
-        // Determine bar position for toast anchoring
-        let is_bottom = ConfigManager::global().bar_position() == BarPosition::Bottom;
-        let bar_edge = if is_bottom { Edge::Bottom } else { Edge::Top };
+        let layout = context.layout;
+        let vertical_edge = layout.position.vertical_edge();
 
         // Initialize layer shell
         window.init_layer_shell();
@@ -81,28 +157,36 @@ impl NotificationToast {
         window.set_exclusive_zone(0);
         window.set_keyboard_mode(KeyboardMode::None);
 
-        // Anchor to bar-edge + right
-        window.set_anchor(bar_edge, true);
-        window.set_anchor(Edge::Right, true);
-        window.set_anchor(Edge::Left, false);
-        // Ensure opposite edge is unanchored
-        let opposite_edge = if is_bottom { Edge::Top } else { Edge::Bottom };
-        window.set_anchor(opposite_edge, false);
+        if let Some(monitor) = context.monitor {
+            window.set_monitor(Some(monitor));
+        }
 
-        window.set_margin(bar_edge, initial_margin);
-        let right_margin = (TOAST_MARGIN_RIGHT
+        window.set_anchor(Edge::Top, vertical_edge == Edge::Top);
+        window.set_anchor(Edge::Bottom, vertical_edge == Edge::Bottom);
+        let side_margin = (TOAST_SIDE_MARGIN
             - SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN))
         .max(0);
-        window.set_margin(Edge::Right, right_margin);
+        let (horizontal_edge, horizontal_margin) = toast_horizontal_layout(
+            layout.position,
+            context.monitor.map(|m| m.geometry().width()),
+            side_margin,
+        );
+
+        window.set_anchor(Edge::Left, horizontal_edge == Some(Edge::Left));
+        window.set_anchor(Edge::Right, horizontal_edge == Some(Edge::Right));
+        window.set_margin(vertical_edge, layout.initial_margin);
+        if let Some(horizontal_edge) = horizontal_edge {
+            window.set_margin(horizontal_edge, horizontal_margin);
+        }
 
         let notification_id = notification.id;
         let toast = Rc::new(Self {
             window,
             notification_id,
             timeout_source: RefCell::new(None),
-            current_bar_margin: Cell::new(initial_margin),
+            current_bar_margin: Cell::new(layout.initial_margin),
             animation_source: RefCell::new(None),
-            bar_edge,
+            bar_edge: vertical_edge,
             height: Cell::new(TOAST_ESTIMATED_HEIGHT),
             theme_callback_guard: RefCell::new(None),
         });
@@ -495,22 +579,30 @@ pub(super) struct NotificationToastManager {
     toast_order: RefCell<Vec<u32>>,
     on_action: ToastActionCallback,
     on_toast_removed: Rc<dyn Fn()>,
+    position: ToastPosition,
 }
 
 impl NotificationToastManager {
     pub fn new(
         on_action: impl Fn(u32, &str) + 'static,
         on_toast_removed: impl Fn() + 'static,
+        position: ToastPosition,
     ) -> Rc<Self> {
         Rc::new(Self {
             toasts: RefCell::new(HashMap::new()),
             toast_order: RefCell::new(Vec::new()),
             on_action: Rc::new(on_action),
             on_toast_removed: Rc::new(on_toast_removed),
+            position,
         })
     }
 
-    pub fn show(self: &Rc<Self>, app: &Application, notification: &Notification) {
+    pub fn show(
+        self: &Rc<Self>,
+        app: &Application,
+        monitor: Option<&gdk::Monitor>,
+        notification: &Notification,
+    ) {
         // Transient notifications must be removed from the service when their toast
         // disappears (dismiss or timeout) so they never leak into the popover
         // history. Close the service entry *before* tearing down the toast so the
@@ -567,7 +659,7 @@ impl NotificationToastManager {
         let initial_margin = {
             let order = self.toast_order.borrow();
             let toasts = self.toasts.borrow();
-            let mut y_offset = (TOAST_BAR_MARGIN - sm).max(0);
+            let mut y_offset = (TOAST_EDGE_MARGIN - sm).max(0);
             for &id in order.iter() {
                 if let Some(toast) = toasts.get(&id) {
                     y_offset += (toast.height() - 2 * sm).max(0) + TOAST_GAP;
@@ -577,13 +669,19 @@ impl NotificationToastManager {
         };
 
         let toast = NotificationToast::new(
-            app,
+            ToastWindowContext {
+                app,
+                monitor,
+                layout: ToastLayout {
+                    position: self.position,
+                    initial_margin,
+                },
+            },
             notification,
             on_dismiss,
             Rc::clone(&self.on_action),
             on_timeout,
             on_height_measured,
-            initial_margin,
         );
 
         self.toasts
@@ -615,7 +713,7 @@ impl NotificationToastManager {
         let order = self.toast_order.borrow();
         let toasts = self.toasts.borrow();
         let sm = SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN);
-        let mut y_offset = (TOAST_BAR_MARGIN - sm).max(0);
+        let mut y_offset = (TOAST_EDGE_MARGIN - sm).max(0);
         for &id in order.iter() {
             if let Some(toast) = toasts.get(&id) {
                 toast.update_bar_margin(y_offset, ConfigManager::global().animations_enabled());
