@@ -206,9 +206,8 @@ impl TaskbarWidget {
 
         // Compute per-instance button padding (the space inside each button,
         // around the icon). `pad` is baked into the calc expressions below.
-        // Taskbar derives from the resolved widget spacing variables so it
-        // follows the same tuned base + user density offset model as the rest
-        // of the bar, while still subtracting per-button padding below.
+        // Taskbar spacing below derives from the raw widget spacing tokens plus
+        // user density offsets, while still subtracting per-button padding.
         let (effective_icon, pad) = compute_button_padding(
             config.icon_size.unwrap_or(layout.theme_icon_size),
             layout.max_button_size,
@@ -226,15 +225,24 @@ impl TaskbarWidget {
         ));
 
         // Per-instance variables defined as calc expressions against the
-        // effective widget spacing. max(0px, ...) guards against user density
-        // offsets that would push the result negative.
+        // raw theme spacing tokens so public offsets scoped to `.taskbar`
+        // inherit into `.content` before the effective taskbar variables are
+        // calculated. max(0px, ...) guards against user density offsets that
+        // would push the result negative.
         let two_pad = 2 * pad;
+        let (theme_padding_var, theme_gap_var) = if is_vertical {
+            ("--vp-widget-content-padding-v", "--vp-widget-content-gap-v")
+        } else {
+            ("--vp-widget-content-padding-h", "--vp-widget-content-gap-h")
+        };
         let content_css = CssProvider::new();
         content_css.load_from_string(&format!(
             ".taskbar .content {{ \
-               --vp-taskbar-content-edge: max(0px, calc(var(--vp-widget-content-padding) - {pad}px)); \
-               --vp-taskbar-button-gap: max(0px, calc(var(--vp-widget-content-gap) - {two_pad}px)); \
-               --vp-taskbar-separator-gap: max(0px, calc(var(--vp-widget-content-gap) - {pad}px - 2px)); \
+               --vp-taskbar-widget-content-padding: max(0px, calc(var({theme_padding_var}) + var(--widget-content-padding-offset, 0px))); \
+               --vp-taskbar-widget-content-gap: max(0px, calc(var({theme_gap_var}) + var(--widget-content-gap-offset, 0px))); \
+               --vp-taskbar-content-edge: max(0px, calc(var(--vp-taskbar-widget-content-padding) - {pad}px)); \
+               --vp-taskbar-button-gap: max(0px, calc(var(--vp-taskbar-widget-content-gap) - {two_pad}px)); \
+               --vp-taskbar-separator-gap: max(0px, calc(var(--vp-taskbar-widget-content-gap) - {pad}px - 2px)); \
             }}",
         ));
         #[allow(deprecated)]

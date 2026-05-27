@@ -101,7 +101,9 @@ sectioned-bar.bar.bar--vertical {{
 
 /* Widget spacing model:
    - root -h/-v tokens are orientation defaults from the theme;
-   - .widget-item computes the final effective tokens consumed by layout;
+   - .widget-item computes default effective tokens for passive/merge wrappers;
+   - .widget > overlay > .content recomputes them so user overrides scoped to
+     widget identity classes like `.clock` or `.battery` take effect;
    - vertical bars switch label/default widgets to compact -v tokens;
    - tray/workspaces intentionally keep roomy -h spacing even in vertical bars;
    - public --widget-content-padding-offset / --widget-content-gap-offset are additive offsets.
@@ -116,8 +118,21 @@ sectioned-bar.bar.bar--vertical {{
     --vp-widget-content-gap: max(0px, calc(var(--vp-widget-content-gap-v) + var(--widget-content-gap-offset, 0px)));
 }}
 
-/* Widget identity classes live on .widget, not .widget-item, so override
-   the final tokens on .content for icon/dot widgets that lack line-height slack. */
+/* Widget identity classes live on .widget, not .widget-item, so recompute
+   the final tokens on .content where widget-scoped user overrides inherit. */
+.widget:not(.widget-group) > overlay > .content {{
+    --vp-widget-content-padding: max(0px, calc(var(--vp-widget-content-padding-h) + var(--widget-content-padding-offset, 0px)));
+    --vp-widget-content-gap: max(0px, calc(var(--vp-widget-content-gap-h) + var(--widget-content-gap-offset, 0px)));
+}}
+
+.bar--vertical .widget:not(.widget-group) > overlay > .content {{
+    --vp-widget-content-padding: max(0px, calc(var(--vp-widget-content-padding-v) + var(--widget-content-padding-offset, 0px)));
+    --vp-widget-content-gap: max(0px, calc(var(--vp-widget-content-gap-v) + var(--widget-content-gap-offset, 0px)));
+}}
+
+/* Icon/dot widgets lack line-height slack, so keep their roomier horizontal
+   spacing tokens even when the bar is vertical. This equal-specificity override
+   relies on source order to beat the generic vertical rule above. */
 .bar--vertical .widget.tray > overlay > .content,
 .bar--vertical .widget.workspaces > overlay > .content {{
     --vp-widget-content-padding: max(0px, calc(var(--vp-widget-content-padding-h) + var(--widget-content-padding-offset, 0px)));
@@ -177,13 +192,10 @@ sectioned-bar.bar.bar--vertical {{
     border: none;
 }}
 
-/* Halve the visible inter-item gap at every seam inside a group. Each
-   item carries `--vp-widget-content-padding` on both inner-content sides; without
-   override, adjacent items show `2 * edge` between their icons (looks doubled
-   vs the intra-merge gap, which is collapsed by the negative-margin overlap
-   inside .merge-group-content + .merge-group-content's set_spacing).
-   Halving both seam-facing sides to `edge / 2` yields a total seam gap of
-   `edge`, matching the merge-group spacing for visual consistency.
+/* Use the effective content gap at every seam inside an explicit group.
+   Each item carries full `--vp-widget-content-padding` at the group edges, but
+   interior seams should match the same gap users tune between child elements.
+   Merge groups handle their collapsed seams separately below.
    - .widget-item: padding lives on .widget > overlay > .content.
    - .widget-merge-group: the leftmost/rightmost passive item's .content
      carries the seam-facing padding (interior passive items are already
@@ -192,22 +204,22 @@ sectioned-bar.bar.bar--vertical {{
    :not(:last-child)  → has a following sibling → halve right side. */
 .widget-group > .content > .widget-item:not(:first-child) > .widget > overlay > .content,
 .widget-group > .content > .widget-merge-group:not(:first-child) > .merge-group-content > .widget-item:first-child > .content {{
-    padding-left: calc(var(--vp-widget-content-padding) / 2);
+    padding-left: calc(var(--vp-widget-content-gap) / 2);
 }}
 .widget-group > .content > .widget-item:not(:last-child) > .widget > overlay > .content,
 .widget-group > .content > .widget-merge-group:not(:last-child) > .merge-group-content > .widget-item:last-child > .content {{
-    padding-right: calc(var(--vp-widget-content-padding) / 2);
+    padding-right: calc(var(--vp-widget-content-gap) / 2);
 }}
 
 .bar--vertical .widget-group > .content > .widget-item:not(:first-child) > .widget > overlay > .content,
 .bar--vertical .widget-group > .content > .widget-merge-group:not(:first-child) > .merge-group-content > .widget-item:first-child > .content {{
     padding-left: var(--widget-padding-y);
-    padding-top: calc(var(--vp-widget-content-padding) / 2);
+    padding-top: calc(var(--vp-widget-content-gap) / 2);
 }}
 .bar--vertical .widget-group > .content > .widget-item:not(:last-child) > .widget > overlay > .content,
 .bar--vertical .widget-group > .content > .widget-merge-group:not(:last-child) > .merge-group-content > .widget-item:last-child > .content {{
     padding-right: var(--widget-padding-y);
-    padding-bottom: calc(var(--vp-widget-content-padding) / 2);
+    padding-bottom: calc(var(--vp-widget-content-gap) / 2);
 }}
 
 /* Position-aware pill shape: outer corners rounded only on the leading
@@ -316,15 +328,16 @@ sectioned-bar.bar.bar--vertical {{
     background-color: transparent;
 }}
 
-/* Pull non-first items left to overlap adjacent .content padding
-   (2 × var(--vp-widget-content-padding)) */
+/* Pull non-first items back over adjacent .content padding. GTK Box spacing
+   already contributes the orientation's base gap, so only add the user gap
+   offset delta here; with no offset this preserves the original overlap. */
 .merge-group-content > .widget-item:not(:first-child) {{
-    margin-left: calc(-2 * var(--vp-widget-content-padding));
+    margin-left: calc(var(--vp-widget-content-gap) - var(--vp-widget-content-gap-h) - 2 * var(--vp-widget-content-padding));
 }}
 
 .bar--vertical .merge-group-content > .widget-item:not(:first-child) {{
     margin-left: 0;
-    margin-top: calc(-2 * var(--vp-widget-content-padding));
+    margin-top: calc(var(--vp-widget-content-gap) - var(--vp-widget-content-gap-v) - 2 * var(--vp-widget-content-padding));
 }}
 
 /* Spacers have no inner padding and can be zero-width; don't give them a
@@ -467,7 +480,7 @@ workspace-container > .workspace-indicator:not(:last-child) {{
    children are buttons/separators, not the visual icons/labels that the
    generic rule targets. The runtime CSS in taskbar.rs sets per-instance
    internal --vp-taskbar-* variables as calc expressions derived from
-   --vp-widget-content-padding/gap. Users can tune taskbar spacing via the
+   raw theme spacing tokens plus public offsets. Users can tune taskbar spacing via the
    public --widget-content-padding-offset / --widget-content-gap-offset hooks
    scoped to .taskbar. */
 

@@ -493,6 +493,8 @@ fn local_runtime_css_variables() -> BTreeSet<&'static str> {
         "--vp-taskbar-button-gap",
         "--vp-taskbar-content-edge",
         "--vp-taskbar-separator-gap",
+        "--vp-taskbar-widget-content-gap",
+        "--vp-taskbar-widget-content-padding",
     ])
 }
 
@@ -1131,9 +1133,12 @@ fn run_test_widgets_grouping_explicit_group() {
 
 fn run_test_widgets_grouping_system_merge() {
     let mut config = test_config();
-    config.widgets.left = vec![vibepanel_core::config::WidgetPlacement::Group {
-        group: vec!["cpu".to_string(), "memory".to_string()],
-    }];
+    config.widgets.left = vec![
+        vibepanel_core::config::WidgetPlacement::Single("custom-a".to_string()),
+        vibepanel_core::config::WidgetPlacement::Group {
+            group: vec!["cpu".to_string(), "memory".to_string()],
+        },
+    ];
     config.widgets.center = Vec::new();
     config.widgets.right = Vec::new();
 
@@ -1229,6 +1234,207 @@ fn run_test_widgets_grouping_spacing_contract() {
 
     window.close();
     flush_gtk();
+}
+
+fn merge_group_child_label_gap(override_css: Option<&str>) -> i32 {
+    let mut config = test_config();
+    config.widgets.left = vec![
+        vibepanel_core::config::WidgetPlacement::Single("custom-a".to_string()),
+        vibepanel_core::config::WidgetPlacement::Group {
+            group: vec!["cpu".to_string(), "memory".to_string()],
+        },
+    ];
+    config.widgets.center = Vec::new();
+    config.widgets.right = Vec::new();
+
+    let fixture = painted_bar_fixture_with_override_css(&config, override_css);
+    let left_section = fixture
+        .bar
+        .section("left")
+        .expect("bar should build a left section");
+    let merge_group =
+        find_descendant_with_class(&left_section, crate::styles::class::WIDGET_MERGE_GROUP)
+            .expect("system widgets should render a merge group");
+    let contents = collect_descendants_with_class(&merge_group, crate::styles::class::CONTENT);
+    assert_eq!(
+        contents.len(),
+        2,
+        "merge group should contain one content box per passive widget"
+    );
+    let first_last_child = contents[0]
+        .last_child()
+        .expect("first passive widget content should have a visible trailing child");
+    let second_first_child = contents[1]
+        .first_child()
+        .expect("second passive widget content should have a visible leading child");
+
+    let first_bounds = bounds_in_window(&first_last_child, &fixture.window);
+    let second_bounds = bounds_in_window(&second_first_child, &fixture.window);
+    let gap = measured_gap(first_bounds, second_bounds);
+
+    fixture.window.close();
+    flush_gtk();
+
+    gap
+}
+
+fn run_test_widgets_grouping_merge_spacing_contract() {
+    let config = test_config();
+    let theme_gap = vibepanel_core::ThemePalette::from_config(&config, None, None)
+        .sizes
+        .widget_content_gap as i32;
+    let default_gap = merge_group_child_label_gap(None);
+    assert_eq!(
+        default_gap, theme_gap,
+        "default merge-group child content gap should match the theme gap once"
+    );
+
+    let offset = 6;
+    let override_css =
+        format!(".widget-merge-group.cpu {{ --widget-content-gap-offset: {offset}px; }}");
+    let offset_gap = merge_group_child_label_gap(Some(&override_css));
+    assert_eq!(
+        offset_gap,
+        theme_gap + offset,
+        "merge-group child content gap should include scoped user gap offset exactly once"
+    );
+}
+
+fn explicit_group_child_gap(override_css: Option<&str>) -> i32 {
+    let mut config = test_config();
+    config.bar.size = 40;
+    config.widgets.left = vec![
+        vibepanel_core::config::WidgetPlacement::Single("clock".to_string()),
+        vibepanel_core::config::WidgetPlacement::Group {
+            group: vec!["custom-a".to_string(), "custom-b".to_string()],
+        },
+    ];
+    config.widgets.center = Vec::new();
+    config.widgets.right = Vec::new();
+
+    let fixture = painted_bar_fixture_with_override_css(&config, override_css);
+    let left_section = fixture
+        .bar
+        .section("left")
+        .expect("bar should build a left section");
+    let group = find_descendant_with_class(&left_section, crate::styles::class::WIDGET_GROUP)
+        .expect("custom widgets should render an explicit group");
+    let grouped_items = collect_descendants_with_class(&group, crate::styles::class::WIDGET_ITEM);
+    assert_eq!(
+        grouped_items.len(),
+        2,
+        "explicit group should contain two grouped widget items"
+    );
+
+    let first_content =
+        find_descendant_with_class(&grouped_items[0], crate::styles::class::CONTENT)
+            .expect("first explicit group item should contain a content box");
+    let second_content =
+        find_descendant_with_class(&grouped_items[1], crate::styles::class::CONTENT)
+            .expect("second explicit group item should contain a content box");
+    let first_last_child = first_content
+        .last_child()
+        .expect("first explicit group content should have a visible trailing child");
+    let second_first_child = second_content
+        .first_child()
+        .expect("second explicit group content should have a visible leading child");
+
+    let first_bounds = bounds_in_window(&first_last_child, &fixture.window);
+    let second_bounds = bounds_in_window(&second_first_child, &fixture.window);
+    let gap = measured_gap(first_bounds, second_bounds);
+
+    fixture.window.close();
+    flush_gtk();
+
+    gap
+}
+
+fn run_test_widgets_grouping_explicit_spacing_contract() {
+    let mut config = test_config();
+    config.bar.size = 40;
+    let theme_gap = vibepanel_core::ThemePalette::from_config(&config, None, None)
+        .sizes
+        .widget_content_gap as i32;
+    let default_gap = explicit_group_child_gap(None);
+    assert_eq!(
+        default_gap, theme_gap,
+        "default explicit-group child content gap should match the theme gap once"
+    );
+
+    let offset = 6;
+    let override_css = format!(".widget-group {{ --widget-content-gap-offset: {offset}px; }}");
+    let offset_gap = explicit_group_child_gap(Some(&override_css));
+    assert_eq!(
+        offset_gap,
+        theme_gap + offset,
+        "explicit-group child content gap should include scoped user gap offset exactly once"
+    );
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StandaloneContentSpacingMetrics {
+    leading_edge: i32,
+    child_gap: i32,
+}
+
+fn standalone_custom_widget_content_spacing(
+    override_css: Option<&str>,
+) -> StandaloneContentSpacingMetrics {
+    let mut config = test_config();
+    config
+        .widgets
+        .widget_configs
+        .entry("custom-a".to_string())
+        .or_default()
+        .options
+        .insert(
+            "icon".to_string(),
+            toml::Value::String("glyph:*".to_string()),
+        );
+
+    let fixture = painted_bar_fixture_with_override_css(&config, override_css);
+    let content = find_descendant_with_class(&fixture.first_surface, crate::styles::class::CONTENT)
+        .expect("standalone custom widget should contain a content box");
+    let first_child = content
+        .first_child()
+        .expect("custom widget content should have a leading child");
+    let second_child = first_child
+        .next_sibling()
+        .expect("custom widget content should have a second child");
+
+    let content_bounds = bounds_in_window(&content, &fixture.window);
+    let first_bounds = bounds_in_window(&first_child, &fixture.window);
+    let second_bounds = bounds_in_window(&second_child, &fixture.window);
+    let metrics = StandaloneContentSpacingMetrics {
+        leading_edge: first_bounds.0 - content_bounds.0,
+        child_gap: measured_gap(first_bounds, second_bounds),
+    };
+
+    fixture.window.close();
+    flush_gtk();
+
+    metrics
+}
+
+fn run_test_widgets_scoped_content_spacing_contract() {
+    let baseline = standalone_custom_widget_content_spacing(None);
+    let padding_offset = 7;
+    let gap_offset = 5;
+    let override_css = format!(
+        ".custom-a {{ --widget-content-padding-offset: {padding_offset}px; --widget-content-gap-offset: {gap_offset}px; }}"
+    );
+    let changed = standalone_custom_widget_content_spacing(Some(&override_css));
+
+    assert_eq!(
+        changed.leading_edge - baseline.leading_edge,
+        padding_offset,
+        "widget-scoped content padding offset should move standalone content's leading edge exactly once"
+    );
+    assert_eq!(
+        changed.child_gap - baseline.child_gap,
+        gap_offset,
+        "widget-scoped content gap offset should change standalone inter-child spacing exactly once"
+    );
 }
 
 fn run_test_widgets_background_color_pixel() {
@@ -1922,6 +2128,21 @@ ui_regression_config_tests!(
         test_ui_regression_widgets_grouping_spacing,
         "widgets.grouping.spacing",
         run_test_widgets_grouping_spacing_contract
+    ),
+    (
+        test_ui_regression_widgets_grouping_merge_spacing,
+        "widgets.grouping.merge-spacing",
+        run_test_widgets_grouping_merge_spacing_contract
+    ),
+    (
+        test_ui_regression_widgets_grouping_explicit_spacing,
+        "widgets.grouping.explicit-spacing",
+        run_test_widgets_grouping_explicit_spacing_contract
+    ),
+    (
+        test_ui_regression_widgets_scoped_content_spacing,
+        "widgets.scoped-content-spacing",
+        run_test_widgets_scoped_content_spacing_contract
     ),
     (
         test_ui_regression_widgets_background_color_pixel,
