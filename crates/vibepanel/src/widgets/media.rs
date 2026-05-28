@@ -6,9 +6,9 @@
 //! - Click opens a popover with full playback controls
 //! - Pop-out button to open a standalone draggable window
 
-use gtk4::Image;
 use gtk4::glib;
 use gtk4::prelude::*;
+use gtk4::{Image, Overlay};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -26,7 +26,7 @@ use crate::widgets::base::{BaseWidget, MenuHandle};
 use crate::widgets::marquee_label::MarqueeLabel;
 use crate::widgets::media_components::{ArtState, art_radius_percent};
 use crate::widgets::media_popover::{MediaPopoverController, build_media_popover_with_controller};
-use crate::widgets::media_visualizer::BarVisualizer;
+use crate::widgets::media_visualizer::{BarVisualizer, button_background_widget};
 use crate::widgets::media_window::{MediaWindowHandle, create_media_window};
 use crate::widgets::rounded_picture::RoundedPicture;
 use crate::widgets::{WidgetConfig, warn_unknown_options};
@@ -271,6 +271,17 @@ fn parse_template(template: &str) -> Vec<TemplateElement> {
     elements
 }
 
+fn template_elements_for_orientation(template: &str, is_vertical: bool) -> Vec<TemplateElement> {
+    if is_vertical {
+        vec![
+            TemplateElement::Widget(WidgetToken::Art),
+            TemplateElement::Widget(WidgetToken::Controls),
+        ]
+    } else {
+        parse_template(template)
+    }
+}
+
 /// Render all non-widget template elements into a single string.
 /// Literals (separators) are only included if both adjacent text tokens have values.
 fn render_text_from_elements(elements: &[TemplateElement], snapshot: &MediaSnapshot) -> String {
@@ -398,6 +409,7 @@ struct ControlsHandle {
     next_btn: gtk4::Button,
     play_pause_btn: gtk4::Button,
     play_pause_icon: IconHandle,
+    visualizer_overlay: Option<Overlay>,
 }
 
 /// Context holding references to all UI widgets for updates.
@@ -496,7 +508,18 @@ fn create_controls(_parent_widget: &gtk4::Box, is_vertical: bool) -> ControlsHan
     play_pause_btn.connect_clicked(|_| {
         MediaService::global().play_pause();
     });
-    container.append(&play_pause_btn);
+    let visualizer_overlay = if is_vertical {
+        let overlay = Overlay::new();
+        overlay.set_child(Some(&play_pause_btn));
+        overlay.set_halign(gtk4::Align::Center);
+        overlay.set_valign(gtk4::Align::Center);
+        overlay.set_overflow(gtk4::Overflow::Visible);
+        container.append(&overlay);
+        Some(overlay)
+    } else {
+        container.append(&play_pause_btn);
+        None
+    };
 
     let next_btn = create_media_control_button(
         &icons,
@@ -514,6 +537,7 @@ fn create_controls(_parent_widget: &gtk4::Box, is_vertical: bool) -> ControlsHan
         next_btn,
         play_pause_btn,
         play_pause_icon,
+        visualizer_overlay,
     }
 }
 
@@ -523,14 +547,7 @@ impl MediaWidget {
         base.set_tooltip("No media playing");
 
         let is_vertical = ConfigManager::global().bar_position().is_vertical();
-        let template_elements = if is_vertical {
-            vec![
-                TemplateElement::Widget(WidgetToken::PlayerIcon),
-                TemplateElement::Widget(WidgetToken::Controls),
-            ]
-        } else {
-            parse_template(&config.template)
-        };
+        let template_elements = template_elements_for_orientation(&config.template, is_vertical);
 
         let mut art_picture: Option<RoundedPicture> = None;
         let mut player_icon: Option<Image> = None;
@@ -561,9 +578,6 @@ impl MediaWidget {
             let image = Image::from_icon_name(media::ICON_AUDIO_GENERIC);
             image.add_css_class(media::PLAYER_ICON);
             image.set_pixel_size(ConfigManager::global().theme_sizes().pixmap_icon_size as i32);
-            if is_vertical {
-                image.set_halign(gtk4::Align::Center);
-            }
             image.set_visible(false);
             player_icon = Some(image);
         }
@@ -807,16 +821,43 @@ impl MediaWidget {
 
         let pending_hide: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
 
-        // Create the bar waveform visualizer as an overlay on the base widget.
-        // Use insert_before to place it behind the content box in paint order.
-        // When disabled in config, skip creation entirely to avoid spawning cava.
-        let bar_visualizer = if config.visualizer && !is_vertical {
-            let overlay = base.overlay().expect("media uses active BaseWidget");
-            let viz = BarVisualizer::new();
-            overlay.add_overlay(viz.widget());
-            overlay.set_measure_overlay(viz.widget(), false);
-            viz.widget().insert_before(overlay, Some(base.content()));
-            Some(viz)
+        // Vertical controls always keep the static accent background so the
+        // accent-text play icon has contrast even when cava is unavailable.
+        if is_vertical
+            && let Some(ctrl) = controls.as_ref()
+            && let Some(overlay) = ctrl.visualizer_overlay.as_ref()
+        {
+            let background = button_background_widget();
+            overlay.add_overlay(&background);
+            overlay.set_measure_overlay(&background, false);
+            background.insert_before(overlay, Some(&ctrl.play_pause_btn));
+        }
+
+        // Create the bar visualizer behind the media content horizontally or behind
+        // the play/pause button vertically. When disabled, skip creation entirely
+        // to avoid spawning cava.
+        let bar_visualizer = if config.visualizer {
+            if is_vertical {
+                if let Some(ctrl) = controls.as_ref()
+                    && let Some(overlay) = ctrl.visualizer_overlay.as_ref()
+                {
+                    let viz = BarVisualizer::new_button_ring();
+                    overlay.add_overlay(viz.widget());
+                    overlay.set_measure_overlay(viz.widget(), false);
+                    viz.widget()
+                        .insert_before(overlay, Some(&ctrl.play_pause_btn));
+                    Some(viz)
+                } else {
+                    None
+                }
+            } else {
+                let overlay = base.overlay().expect("media uses active BaseWidget");
+                let viz = BarVisualizer::new();
+                overlay.add_overlay(viz.widget());
+                overlay.set_measure_overlay(viz.widget(), false);
+                viz.widget().insert_before(overlay, Some(base.content()));
+                Some(viz)
+            }
         } else {
             None
         };
@@ -1362,6 +1403,32 @@ mod tests {
             elements[3],
             TemplateElement::TextToken(TextToken::Artist)
         ));
+    }
+
+    #[test]
+    fn test_vertical_template_uses_album_art_and_controls() {
+        let elements = template_elements_for_orientation("{player_icon}{title}", true);
+
+        assert_eq!(
+            elements,
+            [
+                TemplateElement::Widget(WidgetToken::Art),
+                TemplateElement::Widget(WidgetToken::Controls)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_horizontal_template_respects_configured_template() {
+        let elements = template_elements_for_orientation("{player_icon}{title}", false);
+
+        assert_eq!(
+            elements,
+            [
+                TemplateElement::Widget(WidgetToken::PlayerIcon),
+                TemplateElement::TextToken(TextToken::Title)
+            ]
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ use gtk4::{Align, DrawingArea, cairo};
 
 use crate::services::callbacks::CallbackId;
 use crate::services::cava::{CavaService, NUM_BARS};
+use crate::services::config_manager::ConfigManager;
 use crate::styles::{color, media};
 
 // ============================================================================
@@ -43,8 +44,7 @@ enum State {
 /// While playing, smoothing and redraws happen directly in the cava callback
 /// (already fires at 60fps) — no tick callback needed. A tick callback is
 /// only used for the brief pause-decay animation.
-#[derive(Clone)]
-struct AnimatedBars {
+struct AnimatedBarsInner {
     bars: Rc<RefCell<[f64; NUM_BARS]>>,
     target_bars: Rc<RefCell<[f64; NUM_BARS]>>,
     state: Rc<Cell<State>>,
@@ -56,23 +56,30 @@ struct AnimatedBars {
     frame_counter: Rc<Cell<u32>>,
 }
 
+#[derive(Clone)]
+struct AnimatedBars {
+    inner: Rc<AnimatedBarsInner>,
+}
+
 impl AnimatedBars {
     fn new(redraw_divisor: u32) -> Self {
         Self {
-            bars: Rc::new(RefCell::new([0.0; NUM_BARS])),
-            target_bars: Rc::new(RefCell::new([0.0; NUM_BARS])),
-            state: Rc::new(Cell::new(State::Inactive)),
-            cava_callback_id: Rc::new(RefCell::new(None)),
-            generation: Rc::new(Cell::new(0)),
-            redraw_divisor: redraw_divisor.max(1),
-            frame_counter: Rc::new(Cell::new(0)),
+            inner: Rc::new(AnimatedBarsInner {
+                bars: Rc::new(RefCell::new([0.0; NUM_BARS])),
+                target_bars: Rc::new(RefCell::new([0.0; NUM_BARS])),
+                state: Rc::new(Cell::new(State::Inactive)),
+                cava_callback_id: Rc::new(RefCell::new(None)),
+                generation: Rc::new(Cell::new(0)),
+                redraw_divisor: redraw_divisor.max(1),
+                frame_counter: Rc::new(Cell::new(0)),
+            }),
         }
     }
 
     /// Start animating. Connects to cava; smoothing + redraw happen in the
     /// cava callback directly.
     fn start(&self, da: &DrawingArea) {
-        if self.state.get() == State::Playing {
+        if self.inner.state.get() == State::Playing {
             return;
         }
 
@@ -83,19 +90,21 @@ impl AnimatedBars {
         }
 
         // Cancel any running pause-decay tick callback.
-        self.generation.set(self.generation.get().wrapping_add(1));
+        self.inner
+            .generation
+            .set(self.inner.generation.get().wrapping_add(1));
 
         da.set_visible(true);
-        self.state.set(State::Playing);
-        self.frame_counter.set(0);
+        self.inner.state.set(State::Playing);
+        self.inner.frame_counter.set(0);
 
         cava.start();
 
-        let bars = self.bars.clone();
-        let target_bars = self.target_bars.clone();
+        let bars = self.inner.bars.clone();
+        let target_bars = self.inner.target_bars.clone();
         let da_clone = da.clone();
-        let frame_counter = self.frame_counter.clone();
-        let divisor = self.redraw_divisor;
+        let frame_counter = self.inner.frame_counter.clone();
+        let divisor = self.inner.redraw_divisor;
         let cava_id = cava.connect(move |snapshot| {
             if snapshot.running {
                 let mut targets = target_bars.borrow_mut();
@@ -111,37 +120,37 @@ impl AnimatedBars {
                 da_clone.queue_draw();
             }
         });
-        *self.cava_callback_id.borrow_mut() = Some(cava_id);
+        *self.inner.cava_callback_id.borrow_mut() = Some(cava_id);
     }
 
     /// Pause: disconnect from cava and smoothly decay bars to zero.
     fn pause(&self, da: &DrawingArea) {
-        if self.state.get() == State::Paused {
+        if self.inner.state.get() == State::Paused {
             return;
         }
 
         // Fresh visualizer (e.g. popover reopened while paused):
         // show a static shape without starting cava.
-        if self.state.get() == State::Inactive {
-            self.state.set(State::Paused);
+        if self.inner.state.get() == State::Inactive {
+            self.inner.state.set(State::Paused);
             da.set_visible(true);
             da.queue_draw();
             return;
         }
 
-        self.state.set(State::Paused);
+        self.inner.state.set(State::Paused);
 
-        if let Some(cava_id) = self.cava_callback_id.borrow_mut().take() {
+        if let Some(cava_id) = self.inner.cava_callback_id.borrow_mut().take() {
             CavaService::global().disconnect(cava_id);
         }
 
-        self.target_bars.borrow_mut().fill(0.0);
+        self.inner.target_bars.borrow_mut().fill(0.0);
 
         // Use a tick callback only for the brief decay animation.
-        let current_gen = self.generation.get();
-        let generation = self.generation.clone();
-        let bars = self.bars.clone();
-        let target_bars = self.target_bars.clone();
+        let current_gen = self.inner.generation.get();
+        let generation = self.inner.generation.clone();
+        let bars = self.inner.bars.clone();
+        let target_bars = self.inner.target_bars.clone();
         let last_frame_time = Rc::new(Cell::new(0i64));
 
         da.add_tick_callback(move |da, frame_clock| {
@@ -194,7 +203,7 @@ impl AnimatedBars {
     }
 }
 
-impl Drop for AnimatedBars {
+impl Drop for AnimatedBarsInner {
     fn drop(&mut self) {
         self.generation.set(self.generation.get().wrapping_add(1));
 
@@ -248,7 +257,7 @@ impl MediaVisualizer {
 
         let anim = AnimatedBars::new(1);
 
-        let bars_for_draw = anim.bars.clone();
+        let bars_for_draw = anim.inner.bars.clone();
         let art_f = art_size as f64;
         let cr_f = corner_radius;
         let glow_extra = (max_displacement * 0.3).max(2.0);
@@ -339,6 +348,15 @@ const WAVE_BASE_HEIGHT: f64 = 2.0;
 /// Height of the DrawingArea (enough room for max peak + base).
 const WAVE_AREA_HEIGHT: i32 = 14;
 
+/// Match the vertical media album-art scale; the drawing area adds blob margin.
+const BUTTON_RING_CORE_SCALE: f64 = 0.75;
+const BUTTON_RING_MAX_DISPLACEMENT: f64 = 3.0;
+
+fn button_ring_size() -> i32 {
+    let core_size = (ConfigManager::global().bar_size() as f64 * BUTTON_RING_CORE_SCALE) as i32;
+    core_size + 2 * (BLOB_CLIP_INSET + BUTTON_RING_MAX_DISPLACEMENT) as i32
+}
+
 /// Thin waveform underline for the bar widget.
 #[derive(Clone)]
 pub struct BarVisualizer {
@@ -359,7 +377,7 @@ impl BarVisualizer {
 
         let anim = AnimatedBars::new(3);
 
-        let bars_for_draw = anim.bars.clone();
+        let bars_for_draw = anim.inner.bars.clone();
         drawing_area.set_draw_func(move |da, cr, width, height| {
             let bars = bars_for_draw.borrow();
 
@@ -381,6 +399,41 @@ impl BarVisualizer {
         Self { drawing_area, anim }
     }
 
+    pub(crate) fn new_button_ring() -> Self {
+        let drawing_area = DrawingArea::new();
+        let ring_size = button_ring_size();
+        drawing_area.set_size_request(ring_size, ring_size);
+        drawing_area.set_halign(Align::Center);
+        drawing_area.set_valign(Align::Center);
+        drawing_area.set_can_target(false);
+        drawing_area.add_css_class(media::BAR_VISUALIZER);
+        drawing_area.add_css_class(color::ACCENT);
+
+        let anim = AnimatedBars::new(2);
+
+        let bars_for_draw = anim.inner.bars.clone();
+        let radius_percent =
+            (ConfigManager::global().widget_radius_percent() as f64 / 100.0).min(0.5);
+        drawing_area.set_draw_func(move |da, cr, width, height| {
+            let bars = bars_for_draw.borrow();
+
+            let accent = da.color();
+            let r = accent.red() as f64;
+            let g = accent.green() as f64;
+            let b = accent.blue() as f64;
+
+            let w = width as f64;
+            let h = height as f64;
+            if bars.len() < 3 || w < 1.0 || h < 1.0 {
+                return;
+            }
+
+            draw_button_blob(cr, &*bars, w, h, radius_percent, (r, g, b));
+        });
+
+        Self { drawing_area, anim }
+    }
+
     pub fn widget(&self) -> &DrawingArea {
         &self.drawing_area
     }
@@ -396,6 +449,69 @@ impl BarVisualizer {
     pub fn stop(&self) {
         self.anim.stop(&self.drawing_area);
     }
+}
+
+pub(crate) fn button_background_widget() -> DrawingArea {
+    let drawing_area = DrawingArea::new();
+    let ring_size = button_ring_size();
+    drawing_area.set_size_request(ring_size, ring_size);
+    drawing_area.set_halign(Align::Center);
+    drawing_area.set_valign(Align::Center);
+    drawing_area.set_can_target(false);
+    drawing_area.add_css_class(media::BAR_VISUALIZER);
+    drawing_area.add_css_class(color::ACCENT);
+
+    let radius_percent = (ConfigManager::global().widget_radius_percent() as f64 / 100.0).min(0.5);
+    drawing_area.set_draw_func(move |da, cr, width, height| {
+        let accent = da.color();
+        let r = accent.red() as f64;
+        let g = accent.green() as f64;
+        let b = accent.blue() as f64;
+        let bars = [0.0; NUM_BARS];
+
+        draw_button_blob(
+            cr,
+            &bars,
+            width as f64,
+            height as f64,
+            radius_percent,
+            (r, g, b),
+        );
+    });
+
+    drawing_area
+}
+
+/// Draw a compact rounded-rect blob behind the vertical bar play/pause button.
+fn draw_button_blob(
+    cr: &cairo::Context,
+    bars: &[f64],
+    w: f64,
+    h: f64,
+    radius_percent: f64,
+    (r, g, b): (f64, f64, f64),
+) {
+    let rect_size = w.min(h) - 2.0 * (BLOB_CLIP_INSET + BUTTON_RING_MAX_DISPLACEMENT);
+    if rect_size <= 0.0 {
+        return;
+    }
+
+    let rect = RoundedRect::new(
+        (w - rect_size) / 2.0,
+        (h - rect_size) / 2.0,
+        rect_size,
+        rect_size,
+        rect_size * radius_percent,
+    );
+    draw_rect_blob(
+        cr,
+        &rect,
+        bars,
+        BUTTON_RING_MAX_DISPLACEMENT,
+        -BLOB_CLIP_INSET,
+        (r, g, b),
+        1.0,
+    );
 }
 
 /// Draw the waveform: smooth spline top edge, flat bottom edge.

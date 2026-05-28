@@ -21,6 +21,15 @@ pub fn css(animations: bool) -> String {
     margin-right: 8px;
 }}
 
+.bar--vertical .media-art-small:not(:last-child) {{
+    margin-right: 0;
+}}
+
+.bar--vertical .widget.media:not(.widget-group) > overlay > .content > .media-art-small:not(:last-child) {{
+    margin-top: 2px;
+    margin-bottom: calc(var(--vp-widget-content-gap) + 4px);
+}}
+
 /* Player icon (app icon like Spotify, Firefox) in bar */
 .media-player-icon {{
     min-width: var(--icon-size);
@@ -47,6 +56,8 @@ pub fn css(animations: bool) -> String {
 
 .bar--vertical .media .media-controls {{
     margin-left: 0;
+    margin-top: 2px;
+    margin-bottom: 2px;
 }}
 
 .media-control-btn {{
@@ -58,6 +69,10 @@ pub fn css(animations: bool) -> String {
 
 .media-control-btn.media-control-btn-primary .icon-root {{
     font-size: calc(var(--icon-size) * 1.1);
+}}
+
+.bar--vertical .media-control-btn.media-control-btn-primary:not(:disabled) {{
+    color: var(--color-accent-text, #fff);
 }}
 
 .media-control-btn:hover {{
