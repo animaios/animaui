@@ -7,6 +7,7 @@
 use gtk4::gdk::BUTTON_PRIMARY;
 use gtk4::prelude::*;
 use gtk4::{Box as GtkBox, GestureClick};
+use std::rc::Rc;
 use tracing::{debug, warn};
 
 use super::QuickSettingsWindowHandle;
@@ -599,6 +600,14 @@ impl QuickSettingsWidget {
     /// Get the root GTK widget for this bar item.
     pub fn widget(&self) -> &GtkBox {
         self.base.widget()
+    }
+
+    pub(crate) fn edge_interaction(&self) -> crate::widgets::EdgeInteraction {
+        crate::widgets::EdgeInteraction {
+            popover: Rc::new(self.qs_window_handle.clone())
+                as Rc<dyn crate::popover_registry::PopoverToggleable>,
+            ripple: self.base.ripple_handle().cloned(),
+        }
     }
 }
 

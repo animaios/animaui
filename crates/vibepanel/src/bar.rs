@@ -3,7 +3,7 @@
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, GestureClick, Overlay, gdk};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tracing::{debug, info, warn};
@@ -17,7 +17,7 @@ use crate::services::config_manager::{ConfigManager, ThemeCallbackGuard};
 use crate::services::tooltip::TooltipManager;
 use crate::styles::{class, state, widget as style_widget};
 use crate::widgets::{
-    self, BarState, MenuHandle, PopoverKind, QuickSettingsConfig, RippleHandle,
+    self, BarState, EdgeInteraction, MenuHandle, PopoverKind, QuickSettingsConfig, RippleHandle,
     SystemPopoverBinding, WidgetConfig, WidgetFactory, popover_kind_for,
     trigger_ripple_from_gesture,
 };
@@ -70,6 +70,213 @@ fn screen_margin_spacer_size(position: BarPosition, margin: i32) -> (i32, i32) {
 
 fn screen_margin_spacer_precedes_bar(position: BarPosition) -> bool {
     matches!(position, BarPosition::Top | BarPosition::Left)
+}
+
+#[derive(Clone)]
+struct EdgeClickTarget {
+    widget: gtk4::Widget,
+    interaction: EdgeInteraction,
+}
+
+type EdgeClickTargets = Rc<RefCell<Vec<EdgeClickTarget>>>;
+
+fn register_edge_target(
+    targets: &EdgeClickTargets,
+    widget: &gtk4::Widget,
+    interaction: Option<EdgeInteraction>,
+) {
+    if let Some(interaction) = interaction {
+        targets.borrow_mut().push(EdgeClickTarget {
+            widget: widget.clone(),
+            interaction,
+        });
+    }
+}
+
+fn click_inside_edge_target(targets: &[EdgeClickTarget], picked: gtk4::Widget) -> bool {
+    let mut current = Some(picked);
+    while let Some(widget) = current {
+        if targets.iter().any(|target| target.widget == widget) {
+            return true;
+        }
+        current = widget.parent();
+    }
+    false
+}
+
+fn point_projects_to_edge_target(
+    position: BarPosition,
+    bounds_x: f32,
+    bounds_y: f32,
+    bounds_width: f32,
+    bounds_height: f32,
+    x: f32,
+    y: f32,
+) -> bool {
+    let bounds_right = bounds_x + bounds_width;
+    let bounds_bottom = bounds_y + bounds_height;
+    let (in_flow, on_edge_side) = match position {
+        BarPosition::Top => (x >= bounds_x && x <= bounds_right, y < bounds_y),
+        BarPosition::Bottom => (x >= bounds_x && x <= bounds_right, y > bounds_bottom),
+        BarPosition::Left => (y >= bounds_y && y <= bounds_bottom, x < bounds_x),
+        BarPosition::Right => (y >= bounds_y && y <= bounds_bottom, x > bounds_right),
+    };
+
+    in_flow && on_edge_side
+}
+
+fn edge_target_at(
+    targets: &[EdgeClickTarget],
+    reference: &gtk4::Widget,
+    position: BarPosition,
+    x: f64,
+    y: f64,
+) -> Option<usize> {
+    let x = x as f32;
+    let y = y as f32;
+
+    for (idx, target) in targets.iter().enumerate() {
+        if !target.widget.is_visible() {
+            continue;
+        }
+
+        let Some(mut rect) = target.widget.compute_bounds(reference) else {
+            continue;
+        };
+
+        let mut ancestor = target.widget.parent();
+        let mut clipped_out = false;
+        while let Some(widget) = ancestor {
+            if widget.overflow() == gtk4::Overflow::Hidden {
+                match widget
+                    .compute_bounds(reference)
+                    .and_then(|bounds| rect.intersection(&bounds))
+                {
+                    Some(clipped) => rect = clipped,
+                    None => {
+                        clipped_out = true;
+                        break;
+                    }
+                }
+            }
+
+            if widget == *reference {
+                break;
+            }
+            ancestor = widget.parent();
+        }
+
+        if clipped_out || rect.width() <= 0.0 || rect.height() <= 0.0 {
+            continue;
+        }
+
+        if point_projects_to_edge_target(
+            position,
+            rect.x(),
+            rect.y(),
+            rect.width(),
+            rect.height(),
+            x,
+            y,
+        ) {
+            return Some(idx);
+        }
+    }
+
+    None
+}
+
+fn apply_edge_hover(targets: &[EdgeClickTarget], active_idx: Option<usize>) {
+    for (idx, target) in targets.iter().enumerate() {
+        if Some(idx) == active_idx {
+            target.widget.add_css_class(state::EDGE_HOVER);
+        } else {
+            target.widget.remove_css_class(state::EDGE_HOVER);
+        }
+    }
+}
+
+fn install_edge_click_handler(
+    outer_box: &gtk4::Box,
+    position: BarPosition,
+    targets: &EdgeClickTargets,
+) {
+    let gesture = GestureClick::new();
+    gesture.set_button(gdk::BUTTON_PRIMARY);
+    gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
+
+    let targets_for_cb = targets.clone();
+    let outer_box_weak = outer_box.downgrade();
+    gesture.connect_pressed(move |gesture, _n_press, x, y| {
+        let Some(outer_box) = outer_box_weak.upgrade() else {
+            return;
+        };
+        let outer_widget = outer_box.upcast_ref::<gtk4::Widget>();
+
+        let interaction = {
+            let targets = targets_for_cb.borrow();
+            if let Some(picked) = outer_widget.pick(x, y, gtk4::PickFlags::DEFAULT)
+                && click_inside_edge_target(&targets, picked)
+            {
+                return;
+            }
+
+            let Some(target_idx) = edge_target_at(&targets, outer_widget, position, x, y) else {
+                return;
+            };
+            targets[target_idx].interaction.clone()
+        };
+
+        TooltipManager::global().cancel_and_hide();
+        // Toggle via the popover registry path. MenuHandle::show() routes
+        // through PopoverTracker::set_active(), which dismisses any other
+        // active popover — net behavior matches direct widget clicks.
+        interaction.popover.ipc_toggle();
+        if let Some(ripple) = interaction.ripple.as_ref() {
+            trigger_ripple_from_gesture(gesture, x, y, ripple);
+        }
+
+        gesture.set_state(gtk4::EventSequenceState::Claimed);
+    });
+
+    outer_box.add_controller(gesture);
+
+    let motion = gtk4::EventControllerMotion::new();
+    let active_hover_idx = Rc::new(Cell::new(None));
+    let targets_for_motion = targets.clone();
+    let active_hover_idx_for_motion = active_hover_idx.clone();
+    let outer_box_weak = outer_box.downgrade();
+    motion.connect_motion(move |_motion, x, y| {
+        let Some(outer_box) = outer_box_weak.upgrade() else {
+            return;
+        };
+        let outer_widget = outer_box.upcast_ref::<gtk4::Widget>();
+        let targets = targets_for_motion.borrow();
+        let active_idx = if let Some(picked) = outer_widget.pick(x, y, gtk4::PickFlags::DEFAULT)
+            && click_inside_edge_target(&targets, picked)
+        {
+            None
+        } else {
+            edge_target_at(&targets, outer_widget, position, x, y)
+        };
+        if active_hover_idx_for_motion.get() == active_idx {
+            return;
+        }
+        active_hover_idx_for_motion.set(active_idx);
+        apply_edge_hover(&targets, active_idx);
+    });
+
+    let targets_for_leave = targets.clone();
+    let active_hover_idx_for_leave = active_hover_idx.clone();
+    motion.connect_leave(move |_| {
+        if active_hover_idx_for_leave.get().is_none() {
+            return;
+        }
+        active_hover_idx_for_leave.set(None);
+        apply_edge_hover(&targets_for_leave.borrow(), None);
+    });
+
+    outer_box.add_controller(motion);
 }
 
 /// Production-built bar content shared by the layer-shell window path and
@@ -190,22 +397,48 @@ pub(crate) fn build_bar_content(
         Rc::new(qs_handle.clone()) as Rc<dyn crate::popover_registry::PopoverToggleable>,
     );
 
+    let edge_targets: EdgeClickTargets = Rc::new(RefCell::new(Vec::new()));
+
     // Create left section
-    let left_section = create_section("left", config, state, &qs_handle, output_id, orientation);
+    let left_section = create_section(
+        "left",
+        config,
+        state,
+        &qs_handle,
+        output_id,
+        orientation,
+        &edge_targets,
+    );
     bar_box.set_start_widget(Some(&left_section));
 
     // Create center section only if there are center widgets
     // Without a center widget, the layout manager uses linear allocation
     let has_center_content = !config.widgets.resolved_center().is_empty();
     if has_center_content {
-        let center_section =
-            create_center_section(config, state, &qs_handle, output_id, orientation);
+        let center_section = create_center_section(
+            config,
+            state,
+            &qs_handle,
+            output_id,
+            orientation,
+            &edge_targets,
+        );
         bar_box.set_center_widget(Some(&center_section));
     }
 
     // Create right section
-    let right_section = create_section("right", config, state, &qs_handle, output_id, orientation);
+    let right_section = create_section(
+        "right",
+        config,
+        state,
+        &qs_handle,
+        output_id,
+        orientation,
+        &edge_targets,
+    );
     bar_box.set_end_widget(Some(&right_section));
+
+    install_edge_click_handler(&outer_box, position, &edge_targets);
 
     BuiltBarContent {
         root: outer_box,
@@ -546,11 +779,13 @@ fn build_widget_or_group(
     qs_handle: &crate::widgets::QuickSettingsWindowHandle,
     output_id: Option<&str>,
     orientation: gtk4::Orientation,
+    edge_targets: &EdgeClickTargets,
 ) -> usize {
     match item {
         WidgetOrGroup::Single(entry) => {
             // Single widget with its own island
             if let Some(built) = WidgetFactory::build(entry, Some(qs_handle), output_id) {
+                register_edge_target(edge_targets, &built.widget, built.edge_interaction.clone());
                 container.append(&built.widget);
                 state.add_handle(built.handle);
                 1
@@ -632,6 +867,11 @@ fn build_widget_or_group(
                     for entry in entries {
                         if let Some(built) = WidgetFactory::build(entry, Some(qs_handle), output_id)
                         {
+                            register_edge_target(
+                                edge_targets,
+                                &built.widget,
+                                built.edge_interaction.clone(),
+                            );
                             // Strip the standalone wrapper class so the wrapper-hover
                             // rule doesn't fire — per-item hover is handled by a
                             // group-scoped rule that paints on the .widget-item.
@@ -670,8 +910,14 @@ fn build_widget_or_group(
                     && *kind != PopoverKind::Unmergeable
                     && (real_in_run >= 2 || total_real == 1)
                 {
-                    let merged =
-                        build_merge_group(run_entries, *kind, &content, state, orientation);
+                    let merged = build_merge_group(
+                        run_entries,
+                        *kind,
+                        &content,
+                        state,
+                        orientation,
+                        edge_targets,
+                    );
                     if merged > 0 {
                         count += merged;
                     } else {
@@ -793,6 +1039,7 @@ fn build_merge_group(
     parent_content: &gtk4::Box,
     state: &mut BarState,
     orientation: gtk4::Orientation,
+    edge_targets: &EdgeClickTargets,
 ) -> usize {
     // Overlay wrapper — ripple sits on top of the content box.
     let wrapper = Overlay::new();
@@ -908,6 +1155,14 @@ fn build_merge_group(
     }
 
     parent_content.append(&wrapper);
+    register_edge_target(
+        edge_targets,
+        wrapper.upcast_ref::<gtk4::Widget>(),
+        Some(EdgeInteraction {
+            popover: menu_handle.clone() as Rc<dyn crate::popover_registry::PopoverToggleable>,
+            ripple: Some(ripple_handle.clone()),
+        }),
+    );
 
     // Register the shared menu handle under ALL participating widget names
     // for IPC popover control. Uses underscores (config convention).
@@ -940,6 +1195,7 @@ fn create_section(
     qs_handle: &crate::widgets::QuickSettingsWindowHandle,
     output_id: Option<&str>,
     orientation: gtk4::Orientation,
+    edge_targets: &EdgeClickTargets,
 ) -> gtk4::Box {
     let section = gtk4::Box::new(
         orientation,
@@ -964,8 +1220,15 @@ fn create_section(
     // Build widgets from resolved entries
     let mut widget_count = 0;
     for item in &resolved {
-        widget_count +=
-            build_widget_or_group(item, &section, state, qs_handle, output_id, orientation);
+        widget_count += build_widget_or_group(
+            item,
+            &section,
+            state,
+            qs_handle,
+            output_id,
+            orientation,
+            edge_targets,
+        );
     }
 
     debug!(
@@ -982,14 +1245,22 @@ fn create_center_section(
     qs_handle: &crate::widgets::QuickSettingsWindowHandle,
     output_id: Option<&str>,
     orientation: gtk4::Orientation,
+    edge_targets: &EdgeClickTargets,
 ) -> gtk4::Box {
     let section = gtk4::Box::new(orientation, 0);
     section.add_css_class(class::BAR_SECTION_CENTER);
 
     let mut widget_count = 0;
     for item in &config.widgets.resolved_center() {
-        widget_count +=
-            build_widget_or_group(item, &section, state, qs_handle, output_id, orientation);
+        widget_count += build_widget_or_group(
+            item,
+            &section,
+            state,
+            qs_handle,
+            output_id,
+            orientation,
+            edge_targets,
+        );
     }
 
     debug!("Created center section with {} widget(s)", widget_count);

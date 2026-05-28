@@ -176,7 +176,8 @@ sectioned-bar.bar.bar--vertical {{
 }}
 
 /* Hover targets the wrapper but paints on the surface child */
-.widget-wrapper.clickable:hover > .widget:not(.widget-group) {{
+.widget-wrapper.clickable:hover > .widget:not(.widget-group),
+.widget-wrapper.clickable.edge-hover > .widget:not(.widget-group) {{
     background-color: var(--color-widget-hover-bg);
 }}
 
@@ -286,10 +287,12 @@ sectioned-bar.bar.bar--vertical {{
    color behind the rounded corners, clipped by the child allocation, so
    translucent hover values composite over the bar background exactly once
    without exposing wallpaper at mixed-group seams. */
-.widget-group > .content > .widget-item.clickable:hover {{
+.widget-group > .content > .widget-item.clickable:hover,
+.widget-group > .content > .widget-item.clickable.edge-hover {{
     background-color: transparent;
 }}
-.widget-group > .content > .widget-item.clickable:hover > .widget {{
+.widget-group > .content > .widget-item.clickable:hover > .widget,
+.widget-group > .content > .widget-item.clickable.edge-hover > .widget {{
     background-color: var(--color-widget-hover-bg);
     border-radius: var(--radius-widget);
     box-shadow: 0 0 0 9999px {widget_bg};
@@ -318,10 +321,12 @@ sectioned-bar.bar.bar--vertical {{
     background: transparent;
 }}
 
-.widget-group > .content > .widget-merge-group.clickable:hover {{
+.widget-group > .content > .widget-merge-group.clickable:hover,
+.widget-group > .content > .widget-merge-group.clickable.edge-hover {{
     background-color: transparent;
 }}
-.widget-group > .content > .widget-merge-group.clickable:hover > .merge-group-content {{
+.widget-group > .content > .widget-merge-group.clickable:hover > .merge-group-content,
+.widget-group > .content > .widget-merge-group.clickable.edge-hover > .merge-group-content {{
     background-color: var(--color-widget-hover-bg);
     border-radius: var(--radius-widget);
     box-shadow: 0 0 0 9999px {widget_bg};

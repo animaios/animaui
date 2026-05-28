@@ -1005,6 +1005,16 @@ impl BaseWidget {
         self.ripple_handle.as_ref()
     }
 
+    /// Get this widget's edge-projected interaction handles, when it has a popover.
+    pub(crate) fn edge_interaction(&self) -> Option<crate::widgets::EdgeInteraction> {
+        let popover = self.menu.as_ref()?.borrow().as_ref()?.clone()
+            as Rc<dyn crate::popover_registry::PopoverToggleable>;
+        Some(crate::widgets::EdgeInteraction {
+            popover,
+            ripple: self.ripple_handle.clone(),
+        })
+    }
+
     /// Get the inner `.content` box for adding widget children.
     pub fn content(&self) -> &GtkBox {
         &self.content

@@ -198,6 +198,10 @@ impl ClockWidget {
         self.base.widget()
     }
 
+    pub(crate) fn edge_interaction(&self) -> Option<crate::widgets::EdgeInteraction> {
+        self.base.edge_interaction()
+    }
+
     /// Update the displayed time.
     fn update_time(&self) {
         let now = chrono::Local::now();

@@ -469,6 +469,10 @@ impl NotificationsWidget {
     pub fn widget(&self) -> &GtkBox {
         self.base.widget()
     }
+
+    pub(crate) fn edge_interaction(&self) -> Option<crate::widgets::EdgeInteraction> {
+        self.base.edge_interaction()
+    }
 }
 
 impl Drop for NotificationsWidget {

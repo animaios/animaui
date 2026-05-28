@@ -80,10 +80,19 @@ pub(crate) use system_popover::SystemPopoverBinding;
 use gtk4::Widget;
 use gtk4::prelude::*;
 use std::any::Any;
+use std::rc::Rc;
 use tracing::{debug, warn};
 use vibepanel_core::config::WidgetEntry;
 
 use crate::styles::class;
+
+/// Direct handles for extending a popover-anchored widget's interaction target to the screen edge.
+/// Fire-and-forget click commands are intentionally out of scope because they have no stable anchor.
+#[derive(Clone)]
+pub(crate) struct EdgeInteraction {
+    pub popover: Rc<dyn crate::popover_registry::PopoverToggleable>,
+    pub ripple: Option<RippleHandle>,
+}
 
 /// The kind of shared popover a widget opens when clicked.
 ///
@@ -176,8 +185,28 @@ pub fn warn_unknown_options(widget_name: &str, entry: &WidgetEntry, known_keys: 
 pub struct BuiltWidget {
     /// The GTK widget to add to the container.
     pub widget: Widget,
+    /// Optional interaction handles for Fitts-law edge-projected targets.
+    pub edge_interaction: Option<EdgeInteraction>,
     /// Opaque handle to keep the Rust-side state alive (timers, callbacks, etc.).
     pub handle: Box<dyn Any>,
+}
+
+impl BuiltWidget {
+    fn new(widget: Widget, handle: impl Any + 'static) -> Self {
+        Self {
+            widget,
+            edge_interaction: None,
+            handle: Box::new(handle),
+        }
+    }
+
+    fn with_edge_interaction(
+        mut self,
+        edge_interaction: impl Into<Option<EdgeInteraction>>,
+    ) -> Self {
+        self.edge_interaction = edge_interaction.into();
+        self
+    }
 }
 
 /// Factory for constructing widgets from configuration entries.
@@ -200,10 +229,8 @@ impl WidgetFactory {
                 let cfg = ClockConfig::from_entry(entry);
                 let clock = ClockWidget::new(cfg);
                 let root = clock.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(clock),
-                })
+                let edge_interaction = clock.edge_interaction();
+                Some(BuiltWidget::new(root, clock).with_edge_interaction(edge_interaction))
             }
             "battery" => {
                 if !BatteryService::global().snapshot().available {
@@ -213,55 +240,39 @@ impl WidgetFactory {
                 let cfg = BatteryConfig::from_entry(entry);
                 let battery = BatteryWidget::new(cfg);
                 let root = battery.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(battery),
-                })
+                let edge_interaction = battery.edge_interaction();
+                Some(BuiltWidget::new(root, battery).with_edge_interaction(edge_interaction))
             }
             "workspaces" => {
                 let cfg = WorkspacesConfig::from_entry(entry);
                 let workspaces = WorkspacesWidget::new(cfg, output_id.map(|s| s.to_string()));
                 let root = workspaces.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(workspaces),
-                })
+                Some(BuiltWidget::new(root, workspaces))
             }
             "window_title" => {
                 let cfg = WindowTitleConfig::from_entry(entry);
                 let window_title = WindowTitleWidget::new(cfg, output_id.map(|s| s.to_string()));
                 let root = window_title.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(window_title),
-                })
+                Some(BuiltWidget::new(root, window_title))
             }
             "taskbar" => {
                 let cfg = TaskbarConfig::from_entry(entry);
                 let taskbar = TaskbarWidget::new(cfg, output_id.map(|s| s.to_string()));
                 let root = taskbar.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(taskbar),
-                })
+                Some(BuiltWidget::new(root, taskbar))
             }
             "tray" => {
                 let cfg = TrayConfig::from_entry(entry);
                 let tray = TrayWidget::new(cfg);
                 let root = tray.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(tray),
-                })
+                Some(BuiltWidget::new(root, tray))
             }
             "notifications" => {
                 let cfg = NotificationsConfig::from_entry(entry);
                 let notifications = NotificationsWidget::new(cfg);
                 let root = notifications.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(notifications),
-                })
+                let edge_interaction = notifications.edge_interaction();
+                Some(BuiltWidget::new(root, notifications).with_edge_interaction(edge_interaction))
             }
             "quick_settings" => {
                 let cfg = QuickSettingsConfig::from_entry(entry);
@@ -278,37 +289,28 @@ impl WidgetFactory {
 
                 let widget = QuickSettingsWidget::new(cfg, qs_handle);
                 let root = widget.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(widget),
-                })
+                let edge_interaction = widget.edge_interaction();
+                Some(BuiltWidget::new(root, widget).with_edge_interaction(edge_interaction))
             }
             "updates" => {
                 let cfg = UpdatesConfig::from_entry(entry);
                 let updates = UpdatesWidget::new(cfg);
                 let root = updates.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(updates),
-                })
+                Some(BuiltWidget::new(root, updates))
             }
             "cpu" => {
                 let cfg = CpuConfig::from_entry(entry);
                 let cpu = CpuWidget::new(cfg);
                 let root = cpu.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(cpu),
-                })
+                let edge_interaction = cpu.edge_interaction();
+                Some(BuiltWidget::new(root, cpu).with_edge_interaction(edge_interaction))
             }
             "memory" => {
                 let cfg = MemoryConfig::from_entry(entry);
                 let memory = MemoryWidget::new(cfg);
                 let root = memory.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(memory),
-                })
+                let edge_interaction = memory.edge_interaction();
+                Some(BuiltWidget::new(root, memory).with_edge_interaction(edge_interaction))
             }
             "gpu" => {
                 if !GpuService::global().snapshot().available {
@@ -318,46 +320,34 @@ impl WidgetFactory {
                 let cfg = GpuConfig::from_entry(entry);
                 let gpu = GpuWidget::new(cfg);
                 let root = gpu.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(gpu),
-                })
+                let edge_interaction = gpu.edge_interaction();
+                Some(BuiltWidget::new(root, gpu).with_edge_interaction(edge_interaction))
             }
             "network_speed" => {
                 let cfg = NetworkSpeedConfig::from_entry(entry);
                 let network = NetworkSpeedWidget::new(cfg);
                 let root = network.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(network),
-                })
+                let edge_interaction = network.edge_interaction();
+                Some(BuiltWidget::new(root, network).with_edge_interaction(edge_interaction))
             }
             "keyboard_layout" => {
                 let cfg = KeyboardLayoutConfig::from_entry(entry);
                 let keyboard_layout = KeyboardLayoutWidget::new(cfg);
                 let root = keyboard_layout.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(keyboard_layout),
-                })
+                Some(BuiltWidget::new(root, keyboard_layout))
             }
             "media" => {
                 let cfg = MediaConfig::from_entry(entry);
                 let media = MediaWidget::new(cfg);
                 let root = media.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(media),
-                })
+                let edge_interaction = media.edge_interaction();
+                Some(BuiltWidget::new(root, media).with_edge_interaction(edge_interaction))
             }
             "spacer" => {
                 let cfg = SpacerConfig::from_entry(entry);
                 let spacer = SpacerWidget::new(cfg);
                 let root = spacer.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(spacer),
-                })
+                Some(BuiltWidget::new(root, spacer))
             }
             name if name.starts_with("custom-") => {
                 let custom_id = &name["custom-".len()..];
@@ -370,10 +360,7 @@ impl WidgetFactory {
                 let cfg = CustomConfig::from_entry(entry);
                 let widget = CustomWidget::new(custom_id, cfg);
                 let root = widget.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(widget),
-                })
+                Some(BuiltWidget::new(root, widget))
             }
             name => {
                 warn!("Unknown widget type: '{}', skipping", name);
@@ -395,19 +382,13 @@ impl WidgetFactory {
                 let cfg = CpuConfig::from_entry(entry);
                 let cpu = CpuWidget::new_passive(cfg, shared_binding.clone());
                 let root = cpu.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(cpu),
-                })
+                Some(BuiltWidget::new(root, cpu))
             }
             "memory" => {
                 let cfg = MemoryConfig::from_entry(entry);
                 let memory = MemoryWidget::new_passive(cfg, shared_binding.clone());
                 let root = memory.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(memory),
-                })
+                Some(BuiltWidget::new(root, memory))
             }
             "gpu" => {
                 if !GpuService::global().snapshot().available {
@@ -417,19 +398,13 @@ impl WidgetFactory {
                 let cfg = GpuConfig::from_entry(entry);
                 let gpu = GpuWidget::new_passive(cfg, shared_binding.clone());
                 let root = gpu.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(gpu),
-                })
+                Some(BuiltWidget::new(root, gpu))
             }
             "network_speed" => {
                 let cfg = NetworkSpeedConfig::from_entry(entry);
                 let network = NetworkSpeedWidget::new_passive(cfg, shared_binding.clone());
                 let root = network.widget().clone().upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(network),
-                })
+                Some(BuiltWidget::new(root, network))
             }
             "spacer" => {
                 let cfg = SpacerConfig::from_entry(entry);
@@ -440,10 +415,7 @@ impl WidgetFactory {
                 widget.add_css_class(class::WIDGET_ITEM);
                 widget.add_css_class(class::PASSIVE);
                 let root = widget.upcast::<Widget>();
-                Some(BuiltWidget {
-                    widget: root,
-                    handle: Box::new(spacer),
-                })
+                Some(BuiltWidget::new(root, spacer))
             }
             name => {
                 warn!(

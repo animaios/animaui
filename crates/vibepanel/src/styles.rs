@@ -260,6 +260,9 @@ pub mod state {
     /// Clickable element (`.clickable`).
     pub const CLICKABLE: &str = "clickable";
 
+    /// Synthetic hover from a widget's edge-projected hit target (`.edge-hover`).
+    pub const EDGE_HOVER: &str = "edge-hover";
+
     /// Occupied workspace state (`.occupied`).
     pub const OCCUPIED: &str = "occupied";
 

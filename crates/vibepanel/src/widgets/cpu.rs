@@ -175,6 +175,10 @@ impl CpuWidget {
     pub fn widget(&self) -> &gtk4::Box {
         self.base.widget()
     }
+
+    pub(crate) fn edge_interaction(&self) -> Option<crate::widgets::EdgeInteraction> {
+        self.base.edge_interaction()
+    }
 }
 
 impl Drop for CpuWidget {

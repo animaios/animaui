@@ -694,6 +694,37 @@ fn screen_margin_shell_orientation_matches_screen_edge() {
 }
 
 #[test]
+fn point_projects_to_edge_target_respects_position_and_bounds() {
+    let bounds = (10.0, 20.0, 30.0, 40.0);
+    let cases = [
+        (BarPosition::Top, 25.0, 19.0, true),
+        (BarPosition::Top, 25.0, 20.0, false),
+        (BarPosition::Top, 9.0, 19.0, false),
+        (BarPosition::Top, 41.0, 19.0, false),
+        (BarPosition::Bottom, 25.0, 61.0, true),
+        (BarPosition::Bottom, 25.0, 60.0, false),
+        (BarPosition::Bottom, 9.0, 61.0, false),
+        (BarPosition::Bottom, 41.0, 61.0, false),
+        (BarPosition::Left, 9.0, 40.0, true),
+        (BarPosition::Left, 10.0, 40.0, false),
+        (BarPosition::Left, 9.0, 19.0, false),
+        (BarPosition::Left, 9.0, 61.0, false),
+        (BarPosition::Right, 41.0, 40.0, true),
+        (BarPosition::Right, 40.0, 40.0, false),
+        (BarPosition::Right, 41.0, 19.0, false),
+        (BarPosition::Right, 41.0, 61.0, false),
+    ];
+
+    for (position, x, y, expected) in cases {
+        assert_eq!(
+            point_projects_to_edge_target(position, bounds.0, bounds.1, bounds.2, bounds.3, x, y,),
+            expected,
+            "position={position:?}, point=({x}, {y})"
+        );
+    }
+}
+
+#[test]
 fn merge_runs_spacer_absorbed_between_same_kind() {
     // cpu, spacer, memory → still merges into one System run
     assert_eq!(
