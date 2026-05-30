@@ -662,6 +662,30 @@ fn client_value_to_window_info(value: &Value) -> WindowInfo {
     }
 }
 
+/// True if a client is a dismissed (hidden) scratchpad. Mango clears a
+/// scratchpad's tags when dismissing it, so a scratchpad with no tags is hidden.
+fn is_dismissed_scratchpad(client: &Value) -> bool {
+    let is_scratchpad = client
+        .get("is_scratchpad")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || client
+            .get("is_namedscratchpad")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+    if !is_scratchpad {
+        return false;
+    }
+
+    let has_tags = client
+        .get("tags")
+        .and_then(Value::as_array)
+        .is_some_and(|tags| !tags.is_empty());
+
+    !has_tags
+}
+
 fn apply_window_list_from_clients(shared: &Arc<MangoSocketSharedState>, value: &Value) -> bool {
     let Some(clients) = value.get("clients").and_then(Value::as_array) else {
         return false;
@@ -675,7 +699,13 @@ fn apply_window_list_from_clients(shared: &Arc<MangoSocketSharedState>, value: &
     let mut windows: Vec<_> = clients
         .iter()
         .filter_map(|client| {
-            client_value_to_window(client, focused_client_id, focused_client_known)
+            let window = client_value_to_window(client, focused_client_id, focused_client_known)?;
+            // Hide dismissed scratchpads (tags-based, since a visible scratchpad
+            // can be unfocused).
+            if is_dismissed_scratchpad(client) {
+                return None;
+            }
+            Some(window)
         })
         .enumerate()
         .collect();
@@ -2248,5 +2278,104 @@ mod tests {
         assert_eq!(info.short_name, "us");
         assert_eq!(info.layout_name, "English");
         assert_eq!(info.layout_count, None);
+    }
+
+    // --- scratchpad filtering ---
+    // Dismissed scratchpads have empty tags; summoned ones carry the visible
+    // tagset. Visibility is tags-based, not focus-based.
+
+    #[test]
+    fn socket_window_list_hides_dismissed_scratchpads() {
+        let shared = Arc::new(MangoSocketSharedState::default());
+        // Dismissed scratchpad + dismissed named scratchpad, plus a normal client.
+        let value = serde_json::json!({
+            "clients": [
+                {
+                    "id": 1, "tags": [],
+                    "is_scratchpad": true, "is_namedscratchpad": false
+                },
+                {
+                    "id": 2, "tags": [],
+                    "is_scratchpad": false, "is_namedscratchpad": true
+                },
+                {
+                    "id": 3, "tags": [1],
+                    "is_scratchpad": false, "is_namedscratchpad": false
+                }
+            ]
+        });
+
+        assert!(apply_window_list_from_clients(&shared, &value));
+        let windows = shared.windows.read();
+
+        assert_eq!(windows.len(), 1, "only the normal client should remain");
+        assert_eq!(windows[0].id, 3);
+    }
+
+    #[test]
+    fn socket_window_list_keeps_summoned_scratchpad() {
+        // A summoned (tagged) scratchpad stays in the taskbar even when unfocused.
+        let shared = Arc::new(MangoSocketSharedState::default());
+        let value = serde_json::json!({
+            "clients": [
+                {
+                    "id": 5, "tags": [1],
+                    "is_focused": false,
+                    "is_scratchpad": false, "is_namedscratchpad": true
+                },
+                {
+                    "id": 6, "tags": [2],
+                    "is_focused": true,
+                    "is_scratchpad": false, "is_namedscratchpad": false
+                }
+            ]
+        });
+
+        assert!(apply_window_list_from_clients(&shared, &value));
+        let windows = shared.windows.read();
+
+        assert_eq!(windows.len(), 2, "visible (tagged) scratchpad is kept");
+        assert!(windows.iter().any(|w| w.id == 5));
+        assert!(windows.iter().any(|w| w.id == 6));
+    }
+
+    #[test]
+    fn socket_window_list_keeps_summoned_scratchpad_when_unfocused() {
+        // Regression: a summoned scratchpad that lost focus must still show.
+        let shared = Arc::new(MangoSocketSharedState::default());
+        let value = serde_json::json!({
+            "clients": [
+                {
+                    "id": 10, "tags": [1],
+                    "is_focused": false,
+                    "is_scratchpad": true, "is_namedscratchpad": false
+                }
+            ]
+        });
+
+        assert!(apply_window_list_from_clients(&shared, &value));
+        let windows = shared.windows.read();
+
+        assert_eq!(windows.len(), 1, "unfocused but visible scratchpad is kept");
+        assert_eq!(windows[0].id, 10);
+    }
+
+    #[test]
+    fn socket_window_list_hides_dismissed_scratchpad_missing_tags_field() {
+        // A missing tags field is treated the same as empty (hidden).
+        let shared = Arc::new(MangoSocketSharedState::default());
+        let value = serde_json::json!({
+            "clients": [
+                {"id": 20, "is_scratchpad": false, "is_namedscratchpad": true}
+            ]
+        });
+
+        assert!(apply_window_list_from_clients(&shared, &value));
+        let windows = shared.windows.read();
+
+        assert!(
+            windows.is_empty(),
+            "scratchpad without tags should be hidden"
+        );
     }
 }
