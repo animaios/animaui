@@ -662,19 +662,22 @@ fn client_value_to_window_info(value: &Value) -> WindowInfo {
     }
 }
 
-/// True if a client is a dismissed (hidden) scratchpad. Mango clears a
-/// scratchpad's tags when dismissing it, so a scratchpad with no tags is hidden.
-fn is_dismissed_scratchpad(client: &Value) -> bool {
-    let is_scratchpad = client
+/// True if a client is a scratchpad (regular or named), regardless of visibility.
+fn is_scratchpad_client(client: &Value) -> bool {
+    client
         .get("is_scratchpad")
         .and_then(Value::as_bool)
         .unwrap_or(false)
         || client
             .get("is_namedscratchpad")
             .and_then(Value::as_bool)
-            .unwrap_or(false);
+            .unwrap_or(false)
+}
 
-    if !is_scratchpad {
+/// True if a client is a dismissed (hidden) scratchpad. Mango clears a
+/// scratchpad's tags when dismissing it, so a scratchpad with no tags is hidden.
+fn is_dismissed_scratchpad(client: &Value) -> bool {
+    if !is_scratchpad_client(client) {
         return false;
     }
 
@@ -700,8 +703,9 @@ fn apply_window_list_from_clients(shared: &Arc<MangoSocketSharedState>, value: &
         .iter()
         .filter_map(|client| {
             let window = client_value_to_window(client, focused_client_id, focused_client_known)?;
-            // Hide dismissed scratchpads (tags-based, since a visible scratchpad
-            // can be unfocused).
+            // Always drop dismissed (hidden) scratchpads. Visible scratchpads are
+            // flagged via Window.is_scratchpad and filtered by taskbar
+            // show_scratchpad_windows.
             if is_dismissed_scratchpad(client) {
                 return None;
             }
@@ -809,6 +813,7 @@ fn client_value_to_window(
             .get("is_urgent")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        is_scratchpad: is_scratchpad_client(value),
     })
 }
 
@@ -2335,8 +2340,10 @@ mod tests {
         let windows = shared.windows.read();
 
         assert_eq!(windows.len(), 2, "visible (tagged) scratchpad is kept");
-        assert!(windows.iter().any(|w| w.id == 5));
-        assert!(windows.iter().any(|w| w.id == 6));
+        let scratch = windows.iter().find(|w| w.id == 5).unwrap();
+        assert!(scratch.is_scratchpad, "visible scratchpad is flagged");
+        let normal = windows.iter().find(|w| w.id == 6).unwrap();
+        assert!(!normal.is_scratchpad);
     }
 
     #[test]

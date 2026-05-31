@@ -201,6 +201,8 @@ impl NiriBackend {
                         output,
                         is_focused: win.is_focused,
                         is_urgent: win.is_urgent,
+                        // Niri has no scratchpad concept.
+                        is_scratchpad: false,
                     },
                     output_name,
                     ws_idx,

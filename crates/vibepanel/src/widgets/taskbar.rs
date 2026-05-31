@@ -67,6 +67,9 @@ pub struct TaskbarConfig {
     pub show_workspace_separator: bool,
     /// Optional workspace identity rendered inside workspace separators.
     pub workspace_separator_label: WorkspaceSeparatorLabel,
+    /// Whether to show visible scratchpad windows (MangoWC) in the taskbar.
+    /// Dismissed scratchpads have no tags and are never shown.
+    pub show_scratchpad_windows: bool,
 }
 
 /// Theme-derived layout values computed once at widget construction time.
@@ -111,6 +114,7 @@ impl WidgetConfig for TaskbarConfig {
                 "show_active",
                 "show_workspace_separator",
                 "workspace_separator_label",
+                "show_scratchpad_windows",
             ],
         );
 
@@ -169,6 +173,11 @@ impl WidgetConfig for TaskbarConfig {
                 .unwrap_or(defaults.show_active),
             show_workspace_separator,
             workspace_separator_label,
+            show_scratchpad_windows: entry
+                .options
+                .get("show_scratchpad_windows")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults.show_scratchpad_windows),
         }
     }
 }
@@ -184,6 +193,7 @@ impl Default for TaskbarConfig {
             show_active: true,
             show_workspace_separator: true,
             workspace_separator_label: WorkspaceSeparatorLabel::None,
+            show_scratchpad_windows: true,
         }
     }
 }
@@ -399,6 +409,9 @@ fn update_window_buttons(
         .windows
         .iter()
         .filter(|win| {
+            if !config.show_scratchpad_windows && win.is_scratchpad {
+                return false;
+            }
             if !config.filter_by_output || output_id.is_none() {
                 return true;
             }
@@ -794,6 +807,7 @@ mod tests {
             config.workspace_separator_label,
             WorkspaceSeparatorLabel::None
         );
+        assert!(config.show_scratchpad_windows);
     }
 
     #[test]
@@ -813,6 +827,7 @@ mod tests {
             "workspace_separator_label".to_string(),
             Value::String("number".to_string()),
         );
+        options.insert("show_scratchpad_windows".to_string(), Value::Boolean(false));
 
         let entry = make_widget_entry("taskbar", options);
         let config = TaskbarConfig::from_entry(&entry);
@@ -827,6 +842,7 @@ mod tests {
             config.workspace_separator_label,
             WorkspaceSeparatorLabel::Number
         );
+        assert!(!config.show_scratchpad_windows);
     }
 
     #[test]
