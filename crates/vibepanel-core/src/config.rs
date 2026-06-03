@@ -61,6 +61,13 @@ const MAX_OUTLINE_WIDTH: u32 = 4;
 const MIN_FONT_SCALE: f64 = 0.1;
 const MAX_FONT_SCALE: f64 = 1.0;
 
+/// Default weather refresh interval in seconds.
+pub const DEFAULT_WEATHER_REFRESH_INTERVAL: u64 = 900;
+
+/// Minimum weather refresh interval in seconds.
+/// Weather refreshes should not hammer public APIs on config mistakes.
+pub const MIN_WEATHER_REFRESH_INTERVAL: u64 = 600;
+
 /// Validate an outline color value against the symbolic + hex contract.
 ///
 /// Accepts: "subtle", "accent", "foreground", or a hex color (`#rgb` / `#rrggbb`).
@@ -118,6 +125,9 @@ pub struct Config {
 
     /// Audio configuration.
     pub audio: AudioConfig,
+
+    /// Shared weather data configuration.
+    pub weather: WeatherConfig,
 
     /// Advanced configuration options.
     pub advanced: AdvancedConfig,
@@ -384,6 +394,41 @@ impl Config {
 
         if self.osd.timeout_ms == 0 {
             errors.push("osd.timeout_ms: must be greater than 0".to_string());
+        }
+
+        if self.weather.refresh_interval < MIN_WEATHER_REFRESH_INTERVAL {
+            errors.push(format!(
+                "weather.refresh_interval: must be at least {} seconds",
+                MIN_WEATHER_REFRESH_INTERVAL
+            ));
+        }
+
+        match (self.weather.latitude, self.weather.longitude) {
+            (Some(latitude), Some(longitude)) => {
+                if !(-90.0..=90.0).contains(&latitude) {
+                    errors.push(format!(
+                        "weather.latitude: invalid value '{}', must be between -90 and 90",
+                        latitude
+                    ));
+                }
+                if !(-180.0..=180.0).contains(&longitude) {
+                    errors.push(format!(
+                        "weather.longitude: invalid value '{}', must be between -180 and 180",
+                        longitude
+                    ));
+                }
+            }
+            (Some(_), None) => {
+                errors.push(
+                    "weather.longitude: required when weather.latitude is configured".to_string(),
+                );
+            }
+            (None, Some(_)) => {
+                errors.push(
+                    "weather.latitude: required when weather.longitude is configured".to_string(),
+                );
+            }
+            (None, None) => {}
         }
 
         // Validate opacity ranges (0.0 to 1.0)
@@ -1505,6 +1550,69 @@ pub struct AudioConfig {
     pub allow_overdrive: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WeatherUnits {
+    #[default]
+    Metric,
+    Imperial,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WeatherWindUnits {
+    #[default]
+    #[serde(rename = "km/h", alias = "kmh")]
+    Kmh,
+    #[serde(rename = "mph")]
+    Mph,
+    #[serde(rename = "m/s", alias = "ms")]
+    MetersPerSecond,
+}
+
+/// Shared weather data configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WeatherConfig {
+    /// Resolve location automatically when no explicit location is configured.
+    pub auto_locate: bool,
+
+    /// Explicit latitude.
+    #[serde(default)]
+    pub latitude: Option<f64>,
+
+    /// Explicit longitude.
+    #[serde(default)]
+    pub longitude: Option<f64>,
+
+    /// City or place name to geocode.
+    #[serde(default)]
+    pub location: Option<String>,
+
+    /// Temperature/unit system.
+    pub units: WeatherUnits,
+
+    /// Wind speed units. Defaults to km/h for metric and mph for imperial.
+    #[serde(default)]
+    pub wind_units: Option<WeatherWindUnits>,
+
+    /// Refresh interval in seconds.
+    pub refresh_interval: u64,
+}
+
+impl Default for WeatherConfig {
+    fn default() -> Self {
+        Self {
+            auto_locate: false,
+            latitude: None,
+            longitude: None,
+            location: None,
+            units: WeatherUnits::Metric,
+            wind_units: None,
+            refresh_interval: DEFAULT_WEATHER_REFRESH_INTERVAL,
+        }
+    }
+}
+
 /// Advanced configuration options.
 ///
 /// These settings are for power users and workarounds for specific
@@ -1553,6 +1661,7 @@ mod tests {
         assert_eq!(config.bar.background_opacity, 0.0);
         assert_eq!(config.widgets.background_opacity, 1.0);
         assert!(!config.audio.allow_overdrive);
+        assert_eq!(config.weather.units, WeatherUnits::Metric);
         assert_eq!(config.advanced.compositor, "auto");
         assert_eq!(config.theme.mode, "auto");
         assert!(config.theme.accent.is_none());
@@ -1703,6 +1812,75 @@ mod tests {
 
         let config = Config::load_with_defaults(user_toml).unwrap();
         assert!(config.audio.allow_overdrive);
+    }
+
+    #[test]
+    fn test_load_with_defaults_weather_config() {
+        let user_toml = r#"
+            [weather]
+            auto_locate = true
+            latitude = 40.7128
+            longitude = -74.0060
+            location = "New York"
+            units = "imperial"
+            wind_units = "m/s"
+            refresh_interval = 1200
+        "#;
+
+        let config = Config::load_with_defaults(user_toml).unwrap();
+
+        assert!(config.weather.auto_locate);
+        assert_eq!(config.weather.latitude, Some(40.7128));
+        assert_eq!(config.weather.longitude, Some(-74.0060));
+        assert_eq!(config.weather.location.as_deref(), Some("New York"));
+        assert_eq!(config.weather.units, WeatherUnits::Imperial);
+        assert_eq!(
+            config.weather.wind_units,
+            Some(WeatherWindUnits::MetersPerSecond)
+        );
+        assert_eq!(config.weather.refresh_interval, 1200);
+    }
+
+    #[test]
+    fn test_load_with_defaults_weather_wind_units_aliases() {
+        let config = Config::load_with_defaults("[weather]\nwind_units = \"ms\"").unwrap();
+        assert_eq!(
+            config.weather.wind_units,
+            Some(WeatherWindUnits::MetersPerSecond)
+        );
+
+        let config = Config::load_with_defaults("[weather]\nwind_units = \"kmh\"").unwrap();
+        assert_eq!(config.weather.wind_units, Some(WeatherWindUnits::Kmh));
+    }
+
+    #[test]
+    fn test_validate_weather_coordinate_ranges() {
+        let mut config = Config::default();
+        config.weather.latitude = Some(91.0);
+        config.weather.longitude = Some(-181.0);
+
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("weather.latitude"));
+        assert!(msg.contains("weather.longitude"));
+    }
+
+    #[test]
+    fn test_validate_weather_rejects_partial_coordinates() {
+        let mut config = Config::default();
+        config.weather.latitude = Some(40.7128);
+
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("weather.longitude"));
+    }
+
+    #[test]
+    fn test_validate_weather_refresh_interval_minimum() {
+        let mut config = Config::default();
+        config.weather.refresh_interval = MIN_WEATHER_REFRESH_INTERVAL - 1;
+
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("weather.refresh_interval"));
     }
 
     #[test]
