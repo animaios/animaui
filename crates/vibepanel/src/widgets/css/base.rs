@@ -46,6 +46,12 @@ window.layer-shell-click-catcher {{
     font-size: var(--icon-size);
 }}
 
+/* Vertical spacing adjustment for GTK icons when the bar is in vertical mode */
+.bar.bar--vertical .icon-root > .icon:not(.material-symbol) {{
+    margin-top: 0.15em;
+    margin-bottom: 0.15em;
+}}
+
 /* Material Symbols reserve the same amount of space no matter their shape, so narrow
  * glyphs like battery leave trailing whitespace before the next label.
  * These offsets are small optical corrections around the reserved glyph box. */
