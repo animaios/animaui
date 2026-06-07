@@ -883,6 +883,12 @@ fn center_pixel_of(fixture: &PaintedBarFixture, widget: &gtk4::Widget) -> Rgba8 
     sample_root_pixel(fixture, bounds.0 + bounds.2 / 2, bounds.1 + bounds.3 / 2)
 }
 
+fn background_pixel_of(fixture: &PaintedBarFixture, widget: &gtk4::Widget) -> Rgba8 {
+    let bounds = bounds_in_window(widget, &fixture.window);
+    let x = bounds.0 + (bounds.2 - 4).max(0);
+    sample_root_pixel(fixture, x, bounds.1 + bounds.3 / 2)
+}
+
 fn edge_pixel_of(fixture: &PaintedBarFixture, widget: &gtk4::Widget) -> Rgba8 {
     let bounds = bounds_in_window(widget, &fixture.window);
     sample_root_pixel(fixture, bounds.0 + 1, bounds.1 + bounds.3 / 2)
@@ -1972,13 +1978,13 @@ fn run_test_theme_mode_dark_light_pixels() {
     light.theme.mode = "light".to_string();
 
     let dark_fixture = painted_bar_fixture(&dark);
-    let dark_pixel = center_pixel_of(&dark_fixture, &dark_fixture.first_surface);
+    let dark_pixel = background_pixel_of(&dark_fixture, &dark_fixture.first_surface);
     maybe_hold_probe_window();
     dark_fixture.window.close();
     flush_gtk();
 
     let light_fixture = painted_bar_fixture(&light);
-    let light_pixel = center_pixel_of(&light_fixture, &light_fixture.first_surface);
+    let light_pixel = background_pixel_of(&light_fixture, &light_fixture.first_surface);
     maybe_hold_probe_window();
     light_fixture.window.close();
     flush_gtk();
@@ -1996,7 +2002,6 @@ fn run_test_theme_popover_polarity_pixel() {
     config.theme.mode = "dark".to_string();
     config.theme.popover = Some("light".to_string());
     config.bar.background_color = Some("#101820".to_string());
-    config.widgets.background_color = Some("#101820".to_string());
     config.widgets.background_opacity = 1.0;
     config.widgets.popover_background_opacity = Some(1.0);
 
@@ -2008,7 +2013,7 @@ fn run_test_theme_popover_polarity_pixel() {
     assert_popover_style_bindings(&config);
 
     let bar_fixture = painted_bar_fixture(&config);
-    let bar_pixel = center_pixel_of(&bar_fixture, &bar_fixture.first_surface);
+    let bar_pixel = background_pixel_of(&bar_fixture, &bar_fixture.first_surface);
     maybe_hold_probe_window();
     bar_fixture.window.close();
     flush_gtk();

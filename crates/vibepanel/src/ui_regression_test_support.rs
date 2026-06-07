@@ -25,14 +25,18 @@ pub(crate) fn run_ignored_contract_subprocess(
     let exe = std::env::current_exe().expect("current test binary path should be available");
     let output = {
         let _lock = ui_regression_subprocess_lock();
-        std::process::Command::new(exe)
+        let mut command = std::process::Command::new(exe);
+        command
             .arg(runner_test)
             .arg("--ignored")
             .arg("--nocapture")
             .arg("--test-threads=1")
             .env(env_name, contract)
-            .env("VIBEPANEL_UI_REGRESSION_REQUIRED", "1")
-            .output()
+            .env("VIBEPANEL_UI_REGRESSION_REQUIRED", "1");
+        if std::env::var_os("GSK_RENDERER").is_none() {
+            command.env("GSK_RENDERER", "cairo");
+        }
+        command.output()
     }
     .unwrap_or_else(|_| panic!("{label} subprocess should run"));
 

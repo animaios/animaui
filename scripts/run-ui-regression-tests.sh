@@ -9,5 +9,8 @@ fi
 
 # Run only the ignored GTK UI regression wrappers. Internal runners are invoked
 # by those wrappers and layer-shell contracts still need a real Wayland compositor.
-echo '+xvfb-run -a env -u WAYLAND_DISPLAY GDK_BACKEND=x11 VIBEPANEL_UI_REGRESSION_REQUIRED=1 cargo test -p vibepanel test_ui_regression_ -- --ignored --test-threads=1'
-xvfb-run -a env -u WAYLAND_DISPLAY GDK_BACKEND=x11 VIBEPANEL_UI_REGRESSION_REQUIRED=1 cargo test -p vibepanel test_ui_regression_ -- --ignored --test-threads=1
+# Use Cairo under Xvfb to avoid hardware-dependent Vulkan device loss failures.
+: "${GSK_RENDERER:=cairo}"
+export GSK_RENDERER
+echo '+xvfb-run -a env -u WAYLAND_DISPLAY GDK_BACKEND=x11 GSK_RENDERER='"$GSK_RENDERER"' VIBEPANEL_UI_REGRESSION_REQUIRED=1 cargo test -p vibepanel test_ui_regression_ -- --ignored --test-threads=1'
+xvfb-run -a env -u WAYLAND_DISPLAY GDK_BACKEND=x11 GSK_RENDERER="$GSK_RENDERER" VIBEPANEL_UI_REGRESSION_REQUIRED=1 cargo test -p vibepanel test_ui_regression_ -- --ignored --test-threads=1
