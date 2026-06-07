@@ -554,6 +554,7 @@ impl HyprlandBackend {
             // Track previous state to detect changes
             let previous_active = snapshot.active_workspace.clone();
             let old_occupied = snapshot.occupied_workspaces.clone();
+            let old_urgent = snapshot.urgent_workspaces.clone();
             let old_per_output = snapshot.per_output.clone();
 
             snapshot.occupied_workspaces.clear();
@@ -608,21 +609,49 @@ impl HyprlandBackend {
             let active_changed = snapshot.active_workspace != previous_active;
             let per_output_changed = snapshot.per_output != old_per_output;
 
-            if metadata_changed || occupied_changed || active_changed || per_output_changed {
+            let occupied_workspaces = snapshot.occupied_workspaces.clone();
+            snapshot
+                .urgent_workspaces
+                .retain(|ws_id| occupied_workspaces.contains(ws_id));
+            let urgent_changed = snapshot.urgent_workspaces != old_urgent;
+
+            if metadata_changed
+                || occupied_changed
+                || active_changed
+                || per_output_changed
+                || urgent_changed
+            {
                 trace!(
-                    "refresh_occupied: metadata_changed={}, occupied_changed={}, active_changed={} ({:?} -> {:?}), per_output_changed={}",
+                    "refresh_occupied: metadata_changed={}, occupied_changed={}, active_changed={} ({:?} -> {:?}), per_output_changed={}, urgent_changed={}",
                     metadata_changed,
                     occupied_changed,
                     active_changed,
                     previous_active,
                     snapshot.active_workspace,
-                    per_output_changed
+                    per_output_changed,
+                    urgent_changed
                 );
             }
 
-            return metadata_changed || occupied_changed || active_changed || per_output_changed;
+            return metadata_changed
+                || occupied_changed
+                || active_changed
+                || per_output_changed
+                || urgent_changed;
         }
         false
+    }
+
+    fn clear_urgent_workspace(&self, ws_id: i32) -> bool {
+        // Hyprland exposes urgency as an event only, not in clients/workspaces JSON.
+        // Treat viewing the workspace as acknowledging workspace-level urgency.
+        // TODO: When Hyprland list_windows support lands, replace workspace-level
+        // urgency with address-based tracking so multiple urgent clients on the same
+        // workspace survive focusing/viewing only one client.
+        self.workspace_snapshot
+            .write()
+            .urgent_workspaces
+            .remove(&ws_id)
     }
 
     /// Update active workspace for the focused monitor.
@@ -687,8 +716,8 @@ impl HyprlandBackend {
     /// Refresh active window info from Hyprland.
     ///
     /// Queries `activewindow` JSON and updates `focused_window`.
-    /// Returns true if the window info changed.
-    fn refresh_active_window(&self) -> bool {
+    /// Returns whether the window info changed and the freshly queried workspace ID.
+    fn refresh_active_window(&self) -> (bool, Option<i32>) {
         if let Some(active_window) = self.query_json("activewindow") {
             let title = active_window
                 .get("title")
@@ -718,10 +747,12 @@ impl HyprlandBackend {
             let mut focused = self.focused_window.write();
             if focused.as_ref() != Some(&new_focused) {
                 *focused = Some(new_focused);
-                return true;
+                return (true, workspace_id);
             }
+
+            return (false, workspace_id);
         }
-        false
+        (false, None)
     }
 
     /// Handle a Hyprland event line.
@@ -749,6 +780,7 @@ impl HyprlandBackend {
                         workspace_changed |= self.refresh_occupied();
                     }
                     workspace_changed |= self.update_active_workspace(ws_id);
+                    workspace_changed |= self.clear_urgent_workspace(ws_id);
                 } else {
                     // Named workspace - refetch state
                     debug!(
@@ -770,6 +802,7 @@ impl HyprlandBackend {
                         workspace_changed |= self.refresh_occupied();
                     }
                     workspace_changed |= self.update_active_workspace(ws_id);
+                    workspace_changed |= self.clear_urgent_workspace(ws_id);
                 }
             }
             "createworkspace" | "createworkspacev2" | "destroyworkspace" | "destroyworkspacev2"
@@ -803,12 +836,20 @@ impl HyprlandBackend {
             "activewindow" => {
                 // activewindow>>CLASS,TITLE
                 // Query full window info from Hyprland for consistency
-                window_changed = self.refresh_active_window();
+                let (changed, workspace_id) = self.refresh_active_window();
+                window_changed = changed;
+                if let Some(ws_id) = workspace_id {
+                    workspace_changed |= self.clear_urgent_workspace(ws_id);
+                }
             }
             "activewindowv2" => {
                 // activewindowv2>>ADDRESS
                 // Query the window info from Hyprland
-                window_changed = self.refresh_active_window();
+                let (changed, workspace_id) = self.refresh_active_window();
+                window_changed = changed;
+                if let Some(ws_id) = workspace_id {
+                    workspace_changed |= self.clear_urgent_workspace(ws_id);
+                }
             }
             "focusedmon" => {
                 // focusedmon>>MONNAME,WORKSPACENAME
@@ -838,6 +879,7 @@ impl HyprlandBackend {
                             per_output.active_workspace.insert(ws_id);
                             workspace_changed = true;
                         }
+                        workspace_changed |= snapshot.urgent_workspaces.remove(&ws_id);
                     } else {
                         workspace_changed = self.refresh_occupied();
                     }
@@ -1415,6 +1457,48 @@ mod tests {
 
         let snapshot = backend.workspace_snapshot.read();
         assert_eq!(snapshot.active_workspace, HashSet::from([-1337]));
+    }
+
+    #[test]
+    fn workspace_event_clears_matching_urgent_workspace() {
+        let backend = HyprlandBackend::new(None);
+        *backend.workspaces.write() = vec![WorkspaceMeta {
+            id: 2,
+            idx: 2,
+            name: "2".to_string(),
+            output: None,
+        }];
+        backend
+            .workspace_snapshot
+            .write()
+            .urgent_workspaces
+            .insert(2);
+
+        let (workspace_changed, _, _) = backend.handle_event("workspace>>2");
+
+        let snapshot = backend.workspace_snapshot.read();
+        assert!(workspace_changed);
+        assert_eq!(snapshot.active_workspace, HashSet::from([2]));
+        assert!(!snapshot.urgent_workspaces.contains(&2));
+    }
+
+    #[test]
+    fn clear_urgent_workspace_removes_matching_workspace() {
+        let backend = HyprlandBackend::new(None);
+        backend
+            .workspace_snapshot
+            .write()
+            .urgent_workspaces
+            .insert(4);
+
+        assert!(backend.clear_urgent_workspace(4));
+        assert!(
+            !backend
+                .workspace_snapshot
+                .read()
+                .urgent_workspaces
+                .contains(&4)
+        );
     }
 
     #[test]
