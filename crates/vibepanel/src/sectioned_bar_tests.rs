@@ -1271,6 +1271,188 @@ fn run_test_widgets_grouping_system_merge() {
     flush_gtk();
 }
 
+fn clock_weather_group_counts(show_weather: Option<bool>) -> (usize, usize, usize, usize, usize) {
+    let mut config = test_config();
+    config.widgets.left = vec![vibepanel_core::config::WidgetPlacement::Group {
+        group: vec!["clock".to_string(), "weather".to_string()],
+    }];
+    config.widgets.center = Vec::new();
+    config.widgets.right = Vec::new();
+    if let Some(show_weather) = show_weather {
+        config
+            .widgets
+            .widget_configs
+            .entry("clock".to_string())
+            .or_default()
+            .options
+            .insert(
+                "show_weather".to_string(),
+                toml::Value::Boolean(show_weather),
+            );
+    }
+
+    let (window, bar, _state, _popover_registry_guard, _css_provider) = built_bar_fixture(&config);
+    let left_section = bar
+        .section("left")
+        .expect("bar should build a left section");
+    let counts = (
+        count_descendants_with_class(&left_section, crate::styles::class::WIDGET_GROUP),
+        count_descendants_with_class(&left_section, crate::styles::class::WIDGET_MERGE_GROUP),
+        count_descendants_with_class(&left_section, crate::styles::class::PASSIVE),
+        count_descendants_with_class(&left_section, "clock"),
+        count_descendants_with_class(&left_section, "weather"),
+    );
+
+    window.close();
+    flush_gtk();
+    counts
+}
+
+fn run_test_widgets_grouping_clock_weather_merge() {
+    let (groups, merge_groups, passive, clock, weather) = clock_weather_group_counts(None);
+    assert_eq!((groups, merge_groups, passive), (1, 1, 2));
+    assert!(clock > 0);
+    assert!(weather > 0);
+}
+
+fn run_test_widgets_grouping_clock_weather_explicit_opt_out() {
+    let (groups, merge_groups, passive, clock, weather) = clock_weather_group_counts(Some(false));
+    assert_eq!((groups, merge_groups, passive), (1, 0, 0));
+    assert!(clock > 0);
+    assert!(weather > 0);
+}
+
+fn clock_spacer_group_counts(show_weather: Option<bool>) -> (usize, usize, usize, usize, usize) {
+    let mut config = test_config();
+    config.widgets.left = vec![vibepanel_core::config::WidgetPlacement::Group {
+        group: vec!["clock".to_string(), "spacer".to_string()],
+    }];
+    config.widgets.center = Vec::new();
+    config.widgets.right = Vec::new();
+    if let Some(show_weather) = show_weather {
+        config
+            .widgets
+            .widget_configs
+            .entry("clock".to_string())
+            .or_default()
+            .options
+            .insert(
+                "show_weather".to_string(),
+                toml::Value::Boolean(show_weather),
+            );
+    }
+
+    let (window, bar, _state, _popover_registry_guard, _css_provider) = built_bar_fixture(&config);
+    let left_section = bar
+        .section("left")
+        .expect("bar should build a left section");
+    let counts = (
+        count_descendants_with_class(&left_section, crate::styles::class::WIDGET_GROUP),
+        count_descendants_with_class(&left_section, crate::styles::class::WIDGET_MERGE_GROUP),
+        count_descendants_with_class(&left_section, crate::styles::class::PASSIVE),
+        count_descendants_with_class(&left_section, "clock"),
+        count_descendants_with_class(&left_section, "spacer"),
+    );
+
+    window.close();
+    flush_gtk();
+    counts
+}
+
+fn run_test_widgets_grouping_clock_spacer_merge() {
+    let (groups, merge_groups, passive, clock, spacer) = clock_spacer_group_counts(None);
+    assert_eq!((groups, merge_groups, passive), (1, 1, 2));
+    assert!(clock > 0);
+    assert!(spacer > 0);
+}
+
+fn run_test_widgets_grouping_clock_spacer_merge_opt_out_ignored() {
+    let (groups, merge_groups, passive, clock, spacer) = clock_spacer_group_counts(Some(false));
+    assert_eq!((groups, merge_groups, passive), (1, 1, 2));
+    assert!(clock > 0);
+    assert!(spacer > 0);
+}
+
+fn right_section_child_widths(config: &Config) -> Vec<i32> {
+    let (window, bar, _state, _popover_registry_guard, _css_provider) = built_bar_fixture(config);
+    let right_section = bar
+        .section("right")
+        .expect("bar should build a right section");
+    let mut widths = Vec::new();
+    let mut child = right_section.first_child();
+    while let Some(widget) = child {
+        widths.push(bounds_in_window(&widget, &window).2);
+        child = widget.next_sibling();
+    }
+
+    window.close();
+    flush_gtk();
+    widths
+}
+
+fn config_with_quick_settings_group() -> Config {
+    let mut config = test_config();
+    config.widgets.left = Vec::new();
+    config.widgets.center = Vec::new();
+    config.widgets.right = vec![vibepanel_core::config::WidgetPlacement::Group {
+        group: vec!["quick_settings".to_string(), "custom-vpn".to_string()],
+    }];
+
+    let mut custom_vpn = vibepanel_core::config::WidgetOptions::default();
+    custom_vpn
+        .options
+        .insert("label".to_string(), toml::Value::String("VPN".to_string()));
+    config
+        .widgets
+        .widget_configs
+        .insert("custom-vpn".to_string(), custom_vpn);
+
+    config
+}
+
+fn run_test_widgets_grouping_spacer_does_not_expand_sibling_group() {
+    let compact_config = config_with_quick_settings_group();
+    let compact_widths = right_section_child_widths(&compact_config);
+    assert_eq!(compact_widths.len(), 1);
+    let compact_quick_settings_width = compact_widths[0];
+
+    let mut spaced_config = config_with_quick_settings_group();
+    spaced_config.widgets.right.insert(
+        0,
+        vibepanel_core::config::WidgetPlacement::Group {
+            group: vec!["clock".to_string(), "spacer".to_string()],
+        },
+    );
+
+    let spaced_widths = right_section_child_widths(&spaced_config);
+    assert_eq!(spaced_widths.len(), 2);
+    assert!(
+        spaced_widths[0] > compact_quick_settings_width,
+        "the group containing the flexible spacer should absorb spare width"
+    );
+    assert_eq!(
+        spaced_widths[1], compact_quick_settings_width,
+        "a sibling group without spacer should stay at its natural width"
+    );
+}
+
+fn run_test_widgets_empty_center_spacer_expands_side_section() {
+    let mut config = config_with_quick_settings_group();
+    config.widgets.right.insert(
+        0,
+        vibepanel_core::config::WidgetPlacement::Group {
+            group: vec!["clock".to_string(), "spacer".to_string()],
+        },
+    );
+
+    let widths = right_section_child_widths(&config);
+    assert_eq!(widths.len(), 2);
+    assert!(
+        widths.iter().sum::<i32>() > 300,
+        "with no center section, a bare spacer should still expand the side section"
+    );
+}
+
 fn run_test_widgets_grouping_spacing_contract() {
     let mut config = test_config();
     config.bar.spacing = 18;
@@ -2267,6 +2449,36 @@ ui_regression_config_tests!(
         test_ui_regression_widgets_grouping_system_merge,
         "widgets.grouping.system-merge",
         run_test_widgets_grouping_system_merge
+    ),
+    (
+        test_ui_regression_widgets_grouping_clock_weather_merge,
+        "widgets.grouping.clock-weather-merge",
+        run_test_widgets_grouping_clock_weather_merge
+    ),
+    (
+        test_ui_regression_widgets_grouping_clock_weather_opt_out,
+        "widgets.grouping.clock-weather-opt-out",
+        run_test_widgets_grouping_clock_weather_explicit_opt_out
+    ),
+    (
+        test_ui_regression_widgets_grouping_clock_spacer_merge,
+        "widgets.grouping.clock-spacer-merge",
+        run_test_widgets_grouping_clock_spacer_merge
+    ),
+    (
+        test_ui_regression_widgets_grouping_clock_spacer_merge_opt_out_ignored,
+        "widgets.grouping.clock-spacer-merge-opt-out-ignored",
+        run_test_widgets_grouping_clock_spacer_merge_opt_out_ignored
+    ),
+    (
+        test_ui_regression_widgets_grouping_spacer_does_not_expand_sibling_group,
+        "widgets.grouping.spacer-does-not-expand-sibling-group",
+        run_test_widgets_grouping_spacer_does_not_expand_sibling_group
+    ),
+    (
+        test_ui_regression_widgets_empty_center_spacer_expands_side_section,
+        "widgets.empty-center-spacer-expands-side-section",
+        run_test_widgets_empty_center_spacer_expands_side_section
     ),
     (
         test_ui_regression_widgets_grouping_spacing,
