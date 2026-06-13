@@ -32,6 +32,10 @@ use super::notifications_common::{
     create_notification_image_widget, sanitize_body_markup,
 };
 
+fn toast_surface_margin() -> i32 {
+    SURFACE_SHADOW_MARGIN
+}
+
 /// Configurable screen position for notification toasts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum ToastPosition {
@@ -163,9 +167,7 @@ impl NotificationToast {
 
         window.set_anchor(Edge::Top, vertical_edge == Edge::Top);
         window.set_anchor(Edge::Bottom, vertical_edge == Edge::Bottom);
-        let side_margin = (TOAST_SIDE_MARGIN
-            - SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN))
-        .max(0);
+        let side_margin = (TOAST_SIDE_MARGIN - toast_surface_margin()).max(0);
         let (horizontal_edge, horizontal_margin) = toast_horizontal_layout(
             layout.position,
             context.monitor.map(|m| m.geometry().width()),
@@ -402,11 +404,10 @@ fn build_toast_content(
         outer.add_css_class(notif::TOAST_LOW);
     }
 
-    // Apply uniform shadow margins so the CSS box-shadow is not clipped at
-    // the layer-shell surface boundary.  Unlike popovers (which are flush
-    // against the bar on one side), the toast floats freely and needs equal
-    // margins on all four sides.
-    let sm = SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN);
+    // Keep fixed layout slack around the toast surface. This prevents CSS box
+    // shadows from clipping when enabled, and keeps small user CSS offsets from
+    // clipping when shadows are disabled.
+    let sm = toast_surface_margin();
     outer.set_margin_top(sm);
     outer.set_margin_bottom(sm);
     outer.set_margin_start(sm);
@@ -655,7 +656,7 @@ impl NotificationToastManager {
         // the window taller than the visible content.  Subtract the shadow
         // margins from the height contribution so the visual gap between
         // content boxes matches TOAST_GAP.
-        let sm = SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN);
+        let sm = toast_surface_margin();
         let initial_margin = {
             let order = self.toast_order.borrow();
             let toasts = self.toasts.borrow();
@@ -712,7 +713,7 @@ impl NotificationToastManager {
     fn reposition_toasts(&self) {
         let order = self.toast_order.borrow();
         let toasts = self.toasts.borrow();
-        let sm = SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN);
+        let sm = toast_surface_margin();
         let mut y_offset = (TOAST_EDGE_MARGIN - sm).max(0);
         for &id in order.iter() {
             if let Some(toast) = toasts.get(&id) {

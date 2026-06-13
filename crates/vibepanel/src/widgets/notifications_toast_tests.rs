@@ -144,6 +144,24 @@ fn test_toast_horizontal_layout_contract() {
 }
 
 #[test]
+fn test_toast_surface_margin_independent_of_shadow_setting() {
+    let mut config = Config::default();
+    config.theme.shadows = false;
+    ConfigManager::replace_global_for_test(config.clone());
+    let palette = ConfigManager::global().palette();
+    SurfaceStyleManager::global().reconfigure(
+        palette.surface_styles(),
+        config.advanced.pango_font_rendering,
+    );
+
+    assert_eq!(
+        SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN),
+        0
+    );
+    assert_eq!(toast_surface_margin(), SURFACE_SHADOW_MARGIN);
+}
+
+#[test]
 fn test_notification_toast_critical_class_does_not_apply_visual_tokens() {
     let css = crate::widgets::css::widget_css(&Config::default());
 
@@ -421,9 +439,7 @@ fn test_notification_toast_structure_contract() {
             .expect("toast window should contain a styled surface");
         let container = find_descendant_with_class(&child, notif::TOAST_CONTAINER)
             .expect("toast should render a styled notification container");
-        let side_margin = (TOAST_SIDE_MARGIN
-            - SurfaceStyleManager::global().shadow_margin(SURFACE_SHADOW_MARGIN))
-        .max(0);
+        let side_margin = (TOAST_SIDE_MARGIN - toast_surface_margin()).max(0);
 
         assert!(toast.window.is_layer_window());
         assert_eq!(toast.window.namespace().as_deref(), Some("vibepanel-toast"));
