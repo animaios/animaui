@@ -955,7 +955,6 @@ impl HyprlandBackend {
             }
             "activelayout" => {
                 // activelayout>>KEYBOARD_NAME,LAYOUT_NAME
-                // Only process events from the main keyboard
                 if let Some((kb_name, layout_name)) = data.split_once(',') {
                     let is_main = self
                         .main_keyboard_name
@@ -975,6 +974,16 @@ impl HyprlandBackend {
                         };
                         *self.keyboard_layout.write() = Some(info);
                         keyboard_layout_changed = true;
+                    } else {
+                        let previous = self.keyboard_layout.read().clone();
+                        debug!(
+                            event_keyboard = kb_name,
+                            cached_main_keyboard = ?*self.main_keyboard_name.read(),
+                            "Refreshing keyboard layout after non-main activelayout event"
+                        );
+                        self.fetch_keyboard_layout();
+                        keyboard_layout_changed =
+                            self.keyboard_layout.read().as_ref() != previous.as_ref();
                     }
                 }
             }
@@ -1580,6 +1589,25 @@ mod tests {
                 .read()
                 .urgent_workspaces
                 .contains(&4)
+        );
+    }
+
+    #[test]
+    fn activelayout_main_keyboard_updates_layout_from_event() {
+        let backend = HyprlandBackend::new(None);
+        *backend.main_keyboard_name.write() = Some("keyboard-a".to_string());
+        *backend.keyboard_layout.write() = Some(KeyboardLayoutInfo {
+            layout_name: "English (US)".to_string(),
+            short_name: String::new(),
+            layout_count: Some(2),
+        });
+
+        let (_, _, keyboard_changed) = backend.handle_event("activelayout>>keyboard-a,German");
+
+        assert!(keyboard_changed);
+        assert_eq!(
+            backend.keyboard_layout.read().as_ref().unwrap().layout_name,
+            "German"
         );
     }
 
