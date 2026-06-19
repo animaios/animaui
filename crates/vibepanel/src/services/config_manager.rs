@@ -1318,16 +1318,31 @@ fn widget_names(config: &Config) -> Vec<String> {
         names.extend(format_item("right", w));
     }
 
-    // Also include per-widget configs for comparison
-    for (name, opts) in &config.widgets.widget_configs {
-        names.push(format!(
-            "config:{}:disabled={},click_r={:?},click_m={:?},show_if={:?},show_if_interval={:?},{:?}",
-            name, opts.disabled, opts.on_click_right, opts.on_click_middle,
-            opts.show_if, opts.show_if_interval, opts.options
-        ));
+    // Also include per-widget configs for comparison. Keep this stable across
+    // reloads: HashMap iteration order can differ even when config is identical.
+    let mut widget_configs: Vec<_> = config.widgets.widget_configs.iter().collect();
+    widget_configs.sort_by_key(|(name, _)| *name);
+    for (name, opts) in widget_configs {
+        names.push(widget_config_fingerprint(name, opts));
     }
 
     names
+}
+
+fn widget_config_fingerprint(name: &str, opts: &vibepanel_core::config::WidgetOptions) -> String {
+    let mut option_items: Vec<_> = opts.options.iter().collect();
+    option_items.sort_by_key(|(name, _)| *name);
+
+    format!(
+        "config:{}:disabled={},click_r={:?},click_m={:?},show_if={:?},show_if_interval={:?},{:?}",
+        name,
+        opts.disabled,
+        opts.on_click_right,
+        opts.on_click_middle,
+        opts.show_if,
+        opts.show_if_interval,
+        option_items
+    )
 }
 
 #[cfg(test)]
@@ -1685,5 +1700,84 @@ mod tests {
             .show_if_interval = Some(30);
         let names_with_interval = widget_names(&config);
         assert_ne!(names_with_show_if, names_with_interval);
+    }
+
+    #[test]
+    fn test_widget_fingerprint_is_stable_for_equivalent_configs() {
+        let first_nested: toml::value::Table = [
+            ("a".to_string(), toml::Value::Integer(1)),
+            ("b".to_string(), toml::Value::Integer(2)),
+        ]
+        .into_iter()
+        .collect();
+        let second_nested: toml::value::Table = [
+            ("b".to_string(), toml::Value::Integer(2)),
+            ("a".to_string(), toml::Value::Integer(1)),
+        ]
+        .into_iter()
+        .collect();
+
+        let mut first = Config::default();
+        first.widgets.widget_configs.insert(
+            "clock".to_string(),
+            WidgetOptions {
+                options: [
+                    (
+                        "format".to_string(),
+                        toml::Value::String("%H:%M".to_string()),
+                    ),
+                    ("show_icon".to_string(), toml::Value::Boolean(true)),
+                    ("nested".to_string(), toml::Value::Table(first_nested)),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+        );
+        first.widgets.widget_configs.insert(
+            "battery".to_string(),
+            WidgetOptions {
+                options: [
+                    ("show_icon".to_string(), toml::Value::Boolean(true)),
+                    ("low_threshold".to_string(), toml::Value::Integer(20)),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+        );
+
+        let mut second = Config::default();
+        second.widgets.widget_configs.insert(
+            "battery".to_string(),
+            WidgetOptions {
+                options: [
+                    ("low_threshold".to_string(), toml::Value::Integer(20)),
+                    ("show_icon".to_string(), toml::Value::Boolean(true)),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+        );
+        second.widgets.widget_configs.insert(
+            "clock".to_string(),
+            WidgetOptions {
+                options: [
+                    ("show_icon".to_string(), toml::Value::Boolean(true)),
+                    (
+                        "format".to_string(),
+                        toml::Value::String("%H:%M".to_string()),
+                    ),
+                    ("nested".to_string(), toml::Value::Table(second_nested)),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(widget_names(&first), widget_names(&second));
+        assert!(!config_structure_changed(&first, &second));
     }
 }
