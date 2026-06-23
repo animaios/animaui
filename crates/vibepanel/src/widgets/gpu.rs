@@ -25,6 +25,7 @@ use crate::widgets::system_popover::SystemPopoverBinding;
 use crate::widgets::{WidgetConfig, warn_unknown_options};
 
 const DEFAULT_SHOW_ICON: bool = true;
+const DEFAULT_STABLE_WIDTH: bool = true;
 
 /// GPU display format options.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -55,11 +56,17 @@ pub struct GpuConfig {
     pub show_icon: bool,
     /// Display format for GPU metrics.
     pub format: GpuFormat,
+    /// Stabilize label width for common metric values to reduce layout jitter.
+    pub stable_width: bool,
 }
 
 impl WidgetConfig for GpuConfig {
     fn from_entry(entry: &WidgetEntry) -> Self {
-        warn_unknown_options("gpu", entry, &["show_icon", "format", "device"]);
+        warn_unknown_options(
+            "gpu",
+            entry,
+            &["show_icon", "format", "device", "stable_width"],
+        );
 
         let show_icon = entry
             .options
@@ -74,7 +81,17 @@ impl WidgetConfig for GpuConfig {
             .map(GpuFormat::from_str)
             .unwrap_or_default();
 
-        Self { show_icon, format }
+        let stable_width = entry
+            .options
+            .get("stable_width")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(DEFAULT_STABLE_WIDTH);
+
+        Self {
+            show_icon,
+            format,
+            stable_width,
+        }
     }
 }
 
@@ -83,6 +100,7 @@ impl Default for GpuConfig {
         Self {
             show_icon: DEFAULT_SHOW_ICON,
             format: GpuFormat::default(),
+            stable_width: DEFAULT_STABLE_WIDTH,
         }
     }
 }
@@ -117,7 +135,12 @@ impl GpuWidget {
 
         let icon_handle = base.add_icon("video-display-symbolic", &[widget::GPU_ICON]);
 
+        let is_vertical = ConfigManager::global().bar_position().is_vertical();
         let gpu_label = base.add_label(None, &[widget::GPU_LABEL, class::VCENTER_CAPS]);
+        if let Some(width_chars) = gpu_label_width(&config.format, config.stable_width, is_vertical)
+        {
+            gpu_label.set_width_chars(width_chars);
+        }
 
         icon_handle.widget().set_visible(config.show_icon);
 
@@ -132,7 +155,6 @@ impl GpuWidget {
             let gpu_label = gpu_label.clone();
             let show_icon = config.show_icon;
             let format = config.format.clone();
-            let is_vertical = ConfigManager::global().bar_position().is_vertical();
             let popover_binding = popover_binding.clone();
 
             gpu_service.connect(move |snapshot: &GpuSnapshot| {
@@ -175,6 +197,21 @@ impl GpuWidget {
     pub(crate) fn edge_interaction(&self) -> Option<crate::widgets::EdgeInteraction> {
         self.base.edge_interaction()
     }
+}
+
+fn gpu_label_width(format: &GpuFormat, stable_width: bool, is_vertical: bool) -> Option<i32> {
+    if !stable_width {
+        return None;
+    }
+
+    Some(match (format, is_vertical) {
+        (GpuFormat::Usage, false) => 3,       // 99%
+        (GpuFormat::Usage, true) => 2,        // 99
+        (GpuFormat::Temperature, false) => 4, // 99°C
+        (GpuFormat::Temperature, true) => 3,  // 99°
+        (GpuFormat::Both, false) => 8,        // 99% 99°C
+        (GpuFormat::Both, true) => 3,         // widest line: 99°
+    })
 }
 
 impl Drop for GpuWidget {
@@ -325,12 +362,14 @@ mod tests {
         let config = GpuConfig::from_entry(&entry);
         assert!(config.show_icon);
         assert_eq!(config.format, GpuFormat::Usage);
+        assert!(config.stable_width);
     }
 
     #[test]
     fn test_gpu_config_custom() {
         let mut options = std::collections::HashMap::new();
         options.insert("show_icon".to_string(), toml::Value::Boolean(false));
+        options.insert("stable_width".to_string(), toml::Value::Boolean(false));
         options.insert(
             "format".to_string(),
             toml::Value::String("temperature".to_string()),
@@ -343,6 +382,13 @@ mod tests {
         let config = GpuConfig::from_entry(&entry);
         assert!(!config.show_icon);
         assert_eq!(config.format, GpuFormat::Temperature);
+        assert!(!config.stable_width);
+    }
+
+    #[test]
+    fn test_gpu_label_width_usage_matches_percentage_width() {
+        assert_eq!(gpu_label_width(&GpuFormat::Usage, true, false), Some(3));
+        assert_eq!(gpu_label_width(&GpuFormat::Usage, false, false), None);
     }
 
     #[test]

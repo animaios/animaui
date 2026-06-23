@@ -60,6 +60,10 @@ background_opacity = 1.0
 #   [widgets.media]
 #   visualizer = true  # Enable/disable cava audio visualizer (default: true)
 #
+#   [widgets.cpu]
+#   stable_width = false # Disable width stabilization; default stabilizes common 2-digit metric values
+#   # Also supported by [widgets.memory] and [widgets.gpu]
+#
 #   [widgets.notifications]
 #   toast_position = "top-right"  # "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"
 #
