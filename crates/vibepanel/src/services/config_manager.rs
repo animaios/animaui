@@ -564,6 +564,11 @@ impl ConfigManager {
             .and_then(|p| p.parent().map(|d| d.to_path_buf()))
     }
 
+    /// Return a clone of the currently active configuration.
+    pub fn config_snapshot(&self) -> Config {
+        self.config.borrow().clone()
+    }
+
     /// Check if compositor background blur is enabled.
     ///
     /// When true, vibepanel sends ext-background-effect-v1 blur region hints
