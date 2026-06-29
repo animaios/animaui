@@ -384,6 +384,11 @@ impl BarManager {
             self.ipc_hide();
         }
     }
+
+    /// Whether bars are currently IPC-hidden (not rendering / fully transparent).
+    pub fn is_hidden(&self) -> bool {
+        self.hidden.get()
+    }
 }
 
 /// Check if a monitor is fully ready (has connector and valid geometry).

@@ -564,6 +564,11 @@ impl ConfigManager {
             .and_then(|p| p.parent().map(|d| d.to_path_buf()))
     }
 
+    /// Return a clone of the currently active configuration.
+    pub fn config_snapshot(&self) -> Config {
+        self.config.borrow().clone()
+    }
+
     /// Check if compositor background blur is enabled.
     ///
     /// When true, vibepanel sends ext-background-effect-v1 blur region hints
@@ -1274,6 +1279,16 @@ fn config_structure_changed(old: &Config, new: &Config) -> bool {
         return true;
     }
 
+    if old.bar.mode != new.bar.mode {
+        debug!("bar.mode changed ({} -> {})", old.bar.mode, new.bar.mode);
+        return true;
+    }
+
+    if old.dock != new.dock {
+        debug!("dock config changed");
+        return true;
+    }
+
     // Widget list changes
     let old_widgets = widget_names(old);
     let new_widgets = widget_names(new);
@@ -1881,6 +1896,14 @@ mod tests {
             },
         );
 
+        assert!(config_structure_changed(&old, &new));
+    }
+
+    #[test]
+    fn test_config_structure_changed_detects_bar_mode_toggle() {
+        let old = Config::default();
+        let mut new = old.clone();
+        new.bar.mode = "dock".to_string();
         assert!(config_structure_changed(&old, &new));
     }
 }

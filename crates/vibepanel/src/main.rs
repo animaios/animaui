@@ -3,6 +3,7 @@
 //! This is the main entry point for the vibepanel bar application.
 
 mod bar;
+pub mod dock;
 pub mod layout_math;
 pub mod popover_registry;
 pub mod popover_tracker;
@@ -681,7 +682,6 @@ fn run_gtk_app(config: Config, config_source: Option<PathBuf>) -> ExitCode {
         let debounce_source: std::rc::Rc<std::cell::Cell<Option<gtk4::glib::SourceId>>> =
             std::rc::Rc::new(std::cell::Cell::new(None));
         {
-            let config_for_hotplug = config_for_activate.clone();
             let display_for_hotplug = display.clone();
             let debounce = debounce_source.clone();
             display
@@ -694,7 +694,6 @@ fn run_gtk_app(config: Config, config_source: Option<PathBuf>) -> ExitCode {
                         source.remove();
                     }
                     let display = display_for_hotplug.clone();
-                    let config = config_for_hotplug.clone();
                     let debounce_clear = debounce.clone();
                     debounce.set(Some(gtk4::glib::timeout_add_local_once(
                         std::time::Duration::from_millis(300),
@@ -702,13 +701,13 @@ fn run_gtk_app(config: Config, config_source: Option<PathBuf>) -> ExitCode {
                             // Clear stale SourceId — one-shot timers auto-remove
                             // from the main loop, so the id is invalid after firing.
                             debounce_clear.take();
+                            let config = ConfigManager::global().config_snapshot();
                             bar_manager::sync_monitors_when_ready(&display, &config);
                         },
                     )));
                 });
         }
         {
-            let config_for_hotplug = config_for_activate.clone();
             let display_for_hotplug = display.clone();
             let debounce = debounce_source;
             display
@@ -721,7 +720,6 @@ fn run_gtk_app(config: Config, config_source: Option<PathBuf>) -> ExitCode {
                         source.remove();
                     }
                     let display = display_for_hotplug.clone();
-                    let config = config_for_hotplug.clone();
                     let debounce_clear = debounce.clone();
                     debounce.set(Some(gtk4::glib::timeout_add_local_once(
                         std::time::Duration::from_millis(300),
@@ -729,6 +727,7 @@ fn run_gtk_app(config: Config, config_source: Option<PathBuf>) -> ExitCode {
                             // Clear stale SourceId — one-shot timers auto-remove
                             // from the main loop, so the id is invalid after firing.
                             debounce_clear.take();
+                            let config = ConfigManager::global().config_snapshot();
                             bar_manager::sync_monitors_when_ready(&display, &config);
                         },
                     )));

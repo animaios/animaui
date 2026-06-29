@@ -73,12 +73,12 @@ fn screen_margin_spacer_precedes_bar(position: BarPosition) -> bool {
 }
 
 #[derive(Clone)]
-struct EdgeClickTarget {
+pub(crate) struct EdgeClickTarget {
     widget: gtk4::Widget,
     interaction: EdgeInteraction,
 }
 
-type EdgeClickTargets = Rc<RefCell<Vec<EdgeClickTarget>>>;
+pub(crate) type EdgeClickTargets = Rc<RefCell<Vec<EdgeClickTarget>>>;
 
 fn register_edge_target(
     targets: &EdgeClickTargets,
@@ -500,6 +500,11 @@ pub fn create_bar_window(
     output_id: &str,
     state: &mut BarState,
 ) -> ApplicationWindow {
+    // Dock mode: delegate to the dock builder (Hyprland-only, falls back to bar).
+    if config.bar.mode == "dock" {
+        return crate::dock::create_dock_window(app, config, monitor, output_id, state);
+    }
+
     let position = config.bar.position();
     let is_vertical = position.is_vertical();
     let bar_height = rendered_bar_height(config);
@@ -1281,7 +1286,7 @@ fn build_merge_group(
     count
 }
 
-fn create_section(
+pub(crate) fn create_section(
     position: &str,
     config: &Config,
     state: &mut BarState,
@@ -1332,7 +1337,7 @@ fn create_section(
 }
 
 /// Create the center section with widgets.
-fn create_center_section(
+pub(crate) fn create_center_section(
     config: &Config,
     state: &mut BarState,
     qs_handle: &crate::widgets::QuickSettingsWindowHandle,
