@@ -674,12 +674,6 @@ impl Config {
         {
             warnings.push(format!("theme.wallpaper: file '{}' not found", wallpaper));
         }
-        // Warn if dock mode requested without Hyprland.
-        if self.bar.mode == "dock" && self.advanced.compositor != "hyprland" {
-            warnings.push(
-                "bar.mode = \"dock\" is only supported on Hyprland; the dock will fall back to a bottom bar.".to_string(),
-            );
-        }
         warnings
     }
 

@@ -1,13 +1,10 @@
-//! Dock window implementation using GTK4 and layer-shell.
-//!
-//! The dock is a centered bottom "pill" that shows pinned launchers and running
-//! windows. It auto-hides (Dash-to-Dock style) and reappears when the mouse hits
-//! the bottom screen edge. Hyprland-only (gated in `create_bar_window`).
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::services::bar_manager::BarManager;
+use crate::services::compositor::CompositorManager;
+use crate::widgets::{BarState, WidgetConfig};
 use gtk4::glib::{self, SourceId};
 use gtk4::prelude::*;
 use gtk4::{
@@ -15,11 +12,7 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use tracing::{debug, info, warn};
-use vibepanel_core::Config;
-
-use crate::services::bar_manager::BarManager;
-use crate::services::compositor::CompositorManager;
-use crate::widgets::BarState;
+use vibepanel_core::config::{Config, WidgetEntry};
 
 /// Build the dock content: a centered horizontal pill hosting the configured
 /// widgets (launchers + taskbar).
@@ -38,9 +31,18 @@ pub(crate) fn build_dock_content(
 
     // Build the configured widgets (launchers, taskbar, etc.) into the pill.
     // Reuse the bar's section factory so widget ordering/merging behaves identically.
-    let qs = crate::widgets::QuickSettingsWindowHandle::new(
-        app.clone(),
-        crate::widgets::QuickSettingsConfig::default(),
+    let qs_config = config
+        .widgets
+        .get_options("quick_settings")
+        .map(|opts| {
+            let entry = WidgetEntry::with_options("quick_settings", opts);
+            crate::widgets::QuickSettingsConfig::from_entry(&entry)
+        })
+        .unwrap_or_default();
+    let qs = crate::widgets::QuickSettingsWindowHandle::new(app.clone(), qs_config);
+    crate::popover_registry::register(
+        "quick_settings",
+        Rc::new(qs.clone()) as Rc<dyn crate::popover_registry::PopoverToggleable>,
     );
     let left_section = crate::bar::create_section(
         "left",
@@ -122,11 +124,15 @@ pub fn create_dock_window(
     window.set_monitor(Some(monitor));
     debug!("Dock bound to monitor: {:?}", monitor.connector());
 
-    // Anchor to the bottom edge and stretch across the full width.
+    // Anchor to the bottom edge; let the compositor center horizontally.
+    // We deliberately do NOT anchor Left/Right — anchoring across the full
+    // width would make the transparent surface swallow clicks on underlying
+    // windows at the bottom of the screen. With only Bottom anchored, GTK
+    // auto-sizes the width to the dock content and centers it.
     window.set_anchor(Edge::Top, false);
     window.set_anchor(Edge::Bottom, true);
-    window.set_anchor(Edge::Left, true);
-    window.set_anchor(Edge::Right, true);
+    window.set_anchor(Edge::Left, false);
+    window.set_anchor(Edge::Right, false);
 
     // Reserve space only if the user explicitly pinned the dock to the edge.
     if config.dock.pin_to_edge {
@@ -142,16 +148,10 @@ pub fn create_dock_window(
     let content = build_dock_content(app, config, state, Some(output_id));
     window.set_child(Some(&content));
 
-    // Set window width to the target monitor's width on map.
-    let target_geometry = monitor.geometry();
-    let target_width = target_geometry.width();
-
+    // Let GTK auto-size the dock width to its content; only enforce height.
     window.connect_map(move |win| {
-        win.set_default_size(target_width, dock_height as i32);
-        debug!(
-            "Set dock window size to target monitor width: {}px",
-            target_width
-        );
+        win.set_default_size(-1, dock_height as i32);
+        debug!("Set dock window height: {}px", dock_height);
     });
 
     // Auto-hide wiring (Dash-to-Dock style).
@@ -265,7 +265,3 @@ fn install_dock_auto_hide(
 /// Opaque handle that keeps the auto-hide timer alive for the dock's lifetime.
 #[allow(dead_code)]
 struct DockAutoHideState(Rc<Cell<Option<SourceId>>>);
-
-// Ensure the handle is Send + Sync for BarState's Vec<Box<dyn Any>>.
-unsafe impl Send for DockAutoHideState {}
-unsafe impl Sync for DockAutoHideState {}

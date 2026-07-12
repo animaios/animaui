@@ -1377,19 +1377,9 @@ impl CompositorBackend for HyprlandBackend {
     }
 
     fn focus_window(&self, window_id: u64) {
-        if let Some(clients) = self.query_json("clients")
-            && let Some(addr) = clients.as_array().and_then(|arr| {
-                arr.iter()
-                    .find(|c| {
-                        c.get("address").and_then(|a| a.as_str()).and_then(|a| {
-                            u64::from_str_radix(a.strip_prefix("0x").unwrap_or(a), 16).ok()
-                        }) == Some(window_id)
-                    })
-                    .and_then(|c| c.get("address").and_then(|a| a.as_str().map(String::from)))
-            })
-        {
-            let _ = self.send_command(&format!("dispatch focuswindow address:{addr}"));
-        }
+        // window_id is already the parsed u64 of the hex address; format it
+        // back to hex directly instead of re-querying `clients` over IPC.
+        let _ = self.send_command(&format!("dispatch focuswindow address:0x{:x}", window_id));
     }
 
     fn get_keyboard_layout(&self) -> Option<KeyboardLayoutInfo> {

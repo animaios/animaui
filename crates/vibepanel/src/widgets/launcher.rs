@@ -115,8 +115,6 @@ struct LauncherDot {
 
 pub struct LauncherWidget {
     base: BaseWidget,
-    #[allow(dead_code)]
-    current_snapshot: Rc<RefCell<WindowListSnapshot>>,
     window_list_callback_id: CallbackId,
 }
 
@@ -202,11 +200,9 @@ impl LauncherWidget {
 
         Self {
             base,
-            current_snapshot: snapshot,
             window_list_callback_id,
         }
     }
-
     pub fn widget(&self) -> &GtkBox {
         self.base.widget()
     }
@@ -235,8 +231,16 @@ fn handle_launcher_click(app_id: &str, exec: &str, snapshot: &Rc<RefCell<WindowL
         return;
     }
     debug!("launcher: spawning {:?}", exec);
-    if let Err(e) = std::process::Command::new("sh").arg("-c").arg(exec).spawn() {
-        warn!("launcher: failed to spawn {:?}: {e}", exec);
+    match std::process::Command::new("sh").arg("-c").arg(exec).spawn() {
+        Ok(mut child) => {
+            // Reap the child asynchronously to avoid zombie processes.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(e) => {
+            warn!("launcher: failed to spawn {:?}: {e}", exec);
+        }
     }
 }
 
