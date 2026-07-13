@@ -114,6 +114,11 @@ pub mod class {
 
     /// Bar section center (`.bar-section--center`).
     pub const BAR_SECTION_CENTER: &str = "bar-section--center";
+    /// Dock surface root (`.dock`).
+    pub const DOCK: &str = "dock";
+
+    /// Dock window class (`.dock-window`).
+    pub const DOCK_WINDOW: &str = "dock-window";
 }
 
 /// Foreground/text color classes.
@@ -739,6 +744,15 @@ pub mod widget {
 
     /// Keyboard layout label (`.keyboard-layout-label`).
     pub const KEYBOARD_LAYOUT_LABEL: &str = "keyboard-layout-label";
+    // Launcher
+    /// Launcher widget (`.launcher`).
+    pub const LAUNCHER: &str = "launcher";
+
+    /// Launcher icon button (`.launcher-button`).
+    pub const LAUNCHER_BUTTON: &str = "launcher-button";
+
+    /// Running-window indicator dot (`.dock-running-dot`).
+    pub const DOCK_RUNNING_DOT: &str = "dock-running-dot";
 }
 
 /// Surface and popover classes.

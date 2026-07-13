@@ -131,6 +131,9 @@ pub struct Config {
 
     /// Advanced configuration options.
     pub advanced: AdvancedConfig,
+
+    /// Dock configuration, used when `bar.mode = "dock"`.
+    pub dock: DockConfig,
 }
 
 impl Config {
@@ -330,6 +333,14 @@ impl Config {
             ));
         }
 
+        // Validate bar.mode
+        if self.bar.mode != "bar" && self.bar.mode != "dock" {
+            errors.push(format!(
+                "bar.mode: invalid value '{}', expected \"bar\" or \"dock\"",
+                self.bar.mode
+            ));
+        }
+
         // Validate advanced.compositor
         if !VALID_COMPOSITORS.contains(&self.advanced.compositor.as_str()) {
             errors.push(format!(
@@ -390,6 +401,27 @@ impl Config {
         // Validate numeric ranges
         if self.bar.size == 0 {
             errors.push("bar.size: must be greater than 0".to_string());
+        }
+
+        if !(8..=256).contains(&self.dock.icon_size) {
+            errors.push(format!(
+                "dock.icon_size: invalid value {}, expected 8..=256",
+                self.dock.icon_size
+            ));
+        }
+
+        if self.dock.magnified_icon_size < self.dock.icon_size {
+            errors.push(format!(
+                "dock.magnified_icon_size: {} must be >= dock.icon_size {}",
+                self.dock.magnified_icon_size, self.dock.icon_size
+            ));
+        }
+
+        if !(0.0..=1.0).contains(&self.dock.background_opacity) {
+            errors.push(format!(
+                "dock.background_opacity: invalid value {}, expected 0.0..=1.0",
+                self.dock.background_opacity
+            ));
         }
 
         if self.osd.timeout_ms == 0 {
@@ -606,6 +638,13 @@ impl Config {
                     .to_string(),
             );
         }
+        // Warn if dock mode requested without Hyprland.
+        if self.bar.mode == "dock" && self.advanced.compositor != "hyprland" {
+            warnings.push(
+                "bar.mode = \"dock\" is only supported on Hyprland; the dock will fall back to a bottom bar."
+                    .to_string(),
+            );
+        }
 
         // Warn about popover set to the same polarity as the current mode.
         // When mode = "auto" and scheme is omitted or follows GTK, the effective polarity
@@ -635,7 +674,6 @@ impl Config {
         {
             warnings.push(format!("theme.wallpaper: file '{}' not found", wallpaper));
         }
-
         warnings
     }
 
@@ -645,6 +683,7 @@ impl Config {
 
         lines.push("Bar Configuration:".to_string());
         lines.push(format!("  position: {}", self.bar.position));
+        lines.push(format!("  mode: {}", self.bar.mode));
         lines.push(format!("  size: {}px", self.bar.size));
         lines.push(format!("  spacing: {}px", self.bar.spacing));
         lines.push(format!("  screen_margin: {}px", self.bar.screen_margin));
@@ -792,6 +831,10 @@ pub struct BarConfig {
     /// Default: "top"
     pub position: String,
 
+    /// Window mode: "bar" (default) or "dock".
+    /// "dock" renders a centered bottom Hyprland-only dock instead of a bar.
+    pub mode: String,
+
     /// Base height of the bar in pixels.
     pub size: u32,
 
@@ -841,6 +884,7 @@ impl Default for BarConfig {
     fn default() -> Self {
         Self {
             position: "top".to_string(),
+            mode: "bar".to_string(),
             size: 32,
             spacing: 8,
             screen_margin: 0,
@@ -871,6 +915,45 @@ impl BarConfig {
     /// Returns true if the bar is positioned on a horizontal screen edge.
     pub fn is_horizontal(&self) -> bool {
         self.position().is_horizontal()
+    }
+}
+/// Dock-specific configuration, used when `bar.mode = "dock"`.
+///
+/// By default the dock auto-hides when the mouse leaves and reappears when the
+/// cursor touches the bottom screen edge (Dash-to-Dock style).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DockConfig {
+    /// Auto-hide the dock; reveal on bottom-edge hover. Default: true
+    pub autohide: bool,
+    /// Keep the dock always visible (ignores autohide). Default: false
+    pub always_visible: bool,
+    /// Icon size in pixels for launcher + running-window buttons. Default: 48
+    pub icon_size: u32,
+    /// Reserve exclusive zone so windows don't overlap the dock. Default: false
+    pub pin_to_edge: bool,
+    /// Dock pill background opacity (0.0 transparent .. 1.0 solid). Default: 1.0
+    pub background_opacity: f64,
+    /// Gap between dock icons in pixels. Default: 8
+    pub gap: u32,
+    /// Magnify icon under cursor (macOS style). Default: false
+    pub magnification: bool,
+    /// Max magnified icon size in pixels. Default: 72
+    pub magnified_icon_size: u32,
+}
+
+impl Default for DockConfig {
+    fn default() -> Self {
+        Self {
+            autohide: true,
+            always_visible: false,
+            icon_size: 48,
+            pin_to_edge: false,
+            background_opacity: 1.0,
+            gap: 8,
+            magnification: false,
+            magnified_icon_size: 72,
+        }
     }
 }
 
@@ -2235,6 +2318,62 @@ mod tests {
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("bar.position"));
+    }
+
+    #[test]
+    fn test_validate_dock_mode_bar_ok() {
+        let config = Config::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_dock_mode_dock_ok() {
+        let mut config = Config::default();
+        config.bar.mode = "dock".to_string();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_dock_mode_invalid() {
+        let mut config = Config::default();
+        config.bar.mode = "fiddle".to_string();
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("bar.mode"));
+    }
+
+    #[test]
+    fn test_validate_dock_icon_size_bounds() {
+        let mut low = Config::default();
+        low.dock.icon_size = 5;
+        let msg = low.validate().unwrap_err().to_string();
+        assert!(msg.contains("dock.icon_size"));
+
+        let mut high = Config::default();
+        high.dock.icon_size = 300;
+        let msg = high.validate().unwrap_err().to_string();
+        assert!(msg.contains("dock.icon_size"));
+
+        let mut ok = Config::default();
+        ok.dock.icon_size = 48;
+        assert!(ok.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_dock_magnify_bounds() {
+        let mut config = Config::default();
+        config.dock.icon_size = 48;
+        config.dock.magnified_icon_size = 10;
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("dock.magnified_icon_size"));
+    }
+
+    #[test]
+    fn test_default_dock_config_validates() {
+        assert!(Config::default().validate().is_ok());
     }
 
     #[test]

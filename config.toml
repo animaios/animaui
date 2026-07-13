@@ -18,6 +18,15 @@ border_radius = 30
 background_opacity = 0.0 # 0.0 = transparent (islands), 1.0 = solid
 # outline = true         # Override theme.outline for the bar (omit = inherit)
 
+# [dock]
+# autohide = true       # Auto-hide dock, reveal on bottom-edge hover (default: true)
+# always_visible = false # Keep dock visible always (default: false)
+# icon_size = 48        # Icon size in pixels for launcher + running buttons (default: 48)
+# pin_to_edge = false   # Reserve exclusive zone so windows don't overlap (default: false)
+# background_opacity = 1.0 # Dock pill background opacity 0.0=transparent..1.0=solid (default: 1.0)
+# gap = 8               # Gap between dock icons in pixels (default: 8)
+# magnification = false # Magnify icon under cursor macOS-style (default: false)
+# magnified_icon_size = 72 # Max magnified size in pixels (default: 72)
 [widgets]
 left = ["workspaces", "window_title"]
 center = ["media"]

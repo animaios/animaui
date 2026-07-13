@@ -3,6 +3,7 @@
 //! This is the main entry point for the vibepanel bar application.
 
 mod bar;
+pub mod dock;
 pub mod layout_math;
 pub mod popover_registry;
 pub mod popover_tracker;

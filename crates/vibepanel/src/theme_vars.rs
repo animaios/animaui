@@ -123,6 +123,8 @@ pub(super) const THEME_VAR_EXPECTATIONS: &[ThemeVarExpectation] = &[
     var("--vp-internal-bar-padding-right", Root, BuiltinCss),
     var("--vp-internal-bar-padding-bottom", Root, BuiltinCss),
     var("--vp-internal-bar-padding-left", Root, BuiltinCss),
+    var("--color-accent", UserHook, Alias),
+    var("--dock-gap", UserHook, Alias),
 ];
 
 const fn var(name: &'static str, scope: ThemeVarScope, role: ThemeVarRole) -> ThemeVarExpectation {

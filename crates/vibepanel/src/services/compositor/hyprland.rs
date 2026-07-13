@@ -52,6 +52,8 @@ pub struct HyprlandBackend {
     main_keyboard_name: RwLock<Option<String>>,
     /// Whether this Hyprland instance supports the Lua dispatch API.
     supports_lua_dispatch: AtomicBool,
+    /// Callback for window-list changes, set by CompositorManager.
+    window_list_callback: Mutex<Option<super::WindowListCallback>>,
 }
 
 impl HyprlandBackend {
@@ -72,6 +74,7 @@ impl HyprlandBackend {
             keyboard_layout: RwLock::new(None),
             main_keyboard_name: RwLock::new(None),
             supports_lua_dispatch: AtomicBool::new(false),
+            window_list_callback: Mutex::new(None),
         }
     }
 
@@ -186,6 +189,72 @@ impl HyprlandBackend {
             }
         }
     }
+    /// Query all clients from Hyprland and map them to the generic `Window` type.
+    ///
+    /// Used by `list_windows()` and `focus_window()`. Returns an empty vec on any
+    /// connection or parse failure (consistent with other backends).
+    fn query_clients(&self) -> Vec<super::Window> {
+        let Some(clients) = self.query_json("clients") else {
+            return Vec::new();
+        };
+        let Some(clients) = clients.as_array() else {
+            return Vec::new();
+        };
+
+        clients
+            .iter()
+            .filter_map(|client| {
+                // Skip unmapped/deleted clients.
+                if client.get("mapped").and_then(|v| v.as_bool()) == Some(false) {
+                    return None;
+                }
+
+                let address_str = client.get("address").and_then(|v| v.as_str())?;
+                // Skip clients without a valid address (e.g. destroyed placeholders).
+                if address_str.is_empty() || address_str == "0x0" {
+                    return None;
+                }
+                let id =
+                    u64::from_str_radix(address_str.strip_prefix("0x").unwrap_or(address_str), 16)
+                        .ok()?;
+
+                let workspace_id = client
+                    .get("workspace")
+                    .and_then(Self::workspace_id_from_snapshot);
+                let is_focused = client
+                    .get("focused")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let is_urgent = client
+                    .get("urgent")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                Some(super::Window {
+                    id,
+                    title: client
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    app_id: client
+                        .get("class")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    workspace_id,
+                    output: client
+                        .get("monitor")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    is_focused,
+                    is_urgent,
+                    // Hyprland scratchpad info is not exposed via `clients` JSON.
+                    is_scratchpad: false,
+                })
+            })
+            .collect()
+    }
 
     fn default_workspaces() -> Vec<WorkspaceMeta> {
         (1..=DEFAULT_WORKSPACE_COUNT)
@@ -197,7 +266,6 @@ impl HyprlandBackend {
             })
             .collect()
     }
-
     fn workspace_identity(id: Option<i64>, raw_name: &str) -> Option<(i32, String)> {
         if raw_name.starts_with("special:") {
             return None;
@@ -820,10 +888,10 @@ impl HyprlandBackend {
     }
 
     /// Handle a Hyprland event line.
-    /// Returns (workspace_changed, window_changed, keyboard_layout_changed).
-    fn handle_event(&self, line: &str) -> (bool, bool, bool) {
+    /// Returns (workspace_changed, window_changed, keyboard_layout_changed, window_list_changed).
+    fn handle_event(&self, line: &str) -> (bool, bool, bool, bool) {
         let Some((event, data)) = line.split_once(">>") else {
-            return (false, false, false);
+            return (false, false, false, false);
         };
 
         trace!(
@@ -831,10 +899,10 @@ impl HyprlandBackend {
             event,
             &data[..data.len().min(50)]
         );
-
         let mut workspace_changed = false;
         let mut window_changed = false;
         let mut keyboard_layout_changed = false;
+        let mut window_list_changed = false;
 
         match event {
             "workspace" => {
@@ -854,6 +922,7 @@ impl HyprlandBackend {
                     self.fetch_initial_state();
                     workspace_changed = true;
                 }
+                window_list_changed = true;
             }
             "workspacev2" => {
                 // workspacev2>>ID,NAME
@@ -868,14 +937,17 @@ impl HyprlandBackend {
                     workspace_changed |= self.update_active_workspace(ws_id);
                     workspace_changed |= self.clear_urgent_workspace(ws_id);
                 }
+                window_list_changed = true;
             }
             "createworkspace" | "createworkspacev2" | "destroyworkspace" | "destroyworkspacev2"
             | "renameworkspace" | "closewindow" | "movewindow" => {
                 workspace_changed = self.refresh_occupied();
+                window_list_changed = true;
             }
             "openwindow" => {
                 // openwindow>>ADDRESS,WORKSPACE,CLASS,TITLE
                 workspace_changed = self.refresh_occupied();
+                window_list_changed = true;
             }
             "urgent" => {
                 // urgent>>WINDOW_ADDRESS
@@ -902,6 +974,7 @@ impl HyprlandBackend {
                 // Query full window info from Hyprland for consistency
                 let (changed, workspace_id) = self.refresh_active_window();
                 window_changed = changed;
+                window_list_changed = changed;
                 if let Some(ws_id) = workspace_id {
                     workspace_changed |= self.clear_urgent_workspace(ws_id);
                 }
@@ -911,6 +984,7 @@ impl HyprlandBackend {
                 // Query the window info from Hyprland
                 let (changed, workspace_id) = self.refresh_active_window();
                 window_changed = changed;
+                window_list_changed = changed;
                 if let Some(ws_id) = workspace_id {
                     workspace_changed |= self.clear_urgent_workspace(ws_id);
                 }
@@ -948,6 +1022,7 @@ impl HyprlandBackend {
                         workspace_changed = self.refresh_occupied();
                     }
                 }
+                window_list_changed = true;
             }
             "moveworkspace" | "moveworkspacev2" => {
                 // Workspace moved to different monitor - refresh all state
@@ -990,7 +1065,12 @@ impl HyprlandBackend {
             _ => {}
         }
 
-        (workspace_changed, window_changed, keyboard_layout_changed)
+        (
+            workspace_changed,
+            window_changed,
+            keyboard_layout_changed,
+            window_list_changed,
+        )
     }
 
     /// Run the event loop (in background thread).
@@ -1033,6 +1113,15 @@ impl HyprlandBackend {
         {
             kb_cb(info.clone());
         }
+        // Emit initial window list for taskbar/dock consumers.
+        if let Some(ref wl_cb) = *backend
+            .window_list_callback
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+        {
+            let windows = backend.query_clients();
+            wl_cb(super::WindowListSnapshot { windows });
+        }
 
         // Exponential backoff state
         let mut backoff_ms = RECONNECT_INITIAL_MS;
@@ -1073,7 +1162,8 @@ impl HyprlandBackend {
 
                 match line {
                     Ok(line) => {
-                        let (ws_changed, win_changed, kb_changed) = backend.handle_event(&line);
+                        let (ws_changed, win_changed, kb_changed, window_list_changed) =
+                            backend.handle_event(&line);
 
                         if let Some((ws_cb, win_cb)) = backend
                             .callbacks
@@ -1097,6 +1187,16 @@ impl HyprlandBackend {
                             && let Some(ref info) = *backend.keyboard_layout.read()
                         {
                             kb_cb(info.clone());
+                        }
+
+                        if window_list_changed
+                            && let Some(ref wl_cb) = *backend
+                                .window_list_callback
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                        {
+                            let windows = backend.query_clients();
+                            wl_cb(super::WindowListSnapshot { windows });
                         }
                     }
                     Err(e) => {
@@ -1163,6 +1263,11 @@ impl CompositorBackend for HyprlandBackend {
 
         // Share the running flag with the thread so stop() works correctly
         let running = Arc::clone(&self.running);
+        let window_list_callback = self
+            .window_list_callback
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
 
         // Create Arc for shared access in thread
         // Note: This is a separate instance for the thread, but socket_path is now
@@ -1186,9 +1291,8 @@ impl CompositorBackend for HyprlandBackend {
             supports_lua_dispatch: AtomicBool::new(
                 self.supports_lua_dispatch.load(Ordering::Relaxed),
             ),
+            window_list_callback: Mutex::new(window_list_callback),
         });
-
-        // Start event loop thread
         let handle = thread::Builder::new()
             .name("hyprland-event-loop".into())
             .spawn(move || {
@@ -1258,11 +1362,29 @@ impl CompositorBackend for HyprlandBackend {
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(callback);
     }
+    fn set_window_list_callback(&self, callback: super::WindowListCallback) {
+        *self
+            .window_list_callback
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(callback.clone());
+        // Emit initial snapshot so consumers (taskbar/dock) get immediate data.
+        let windows = self.list_windows();
+        callback(super::WindowListSnapshot { windows });
+    }
+
+    fn list_windows(&self) -> Vec<super::Window> {
+        self.query_clients()
+    }
+
+    fn focus_window(&self, window_id: u64) {
+        // window_id is already the parsed u64 of the hex address; format it
+        // back to hex directly instead of re-querying `clients` over IPC.
+        let _ = self.send_command(&format!("dispatch focuswindow address:0x{:x}", window_id));
+    }
 
     fn get_keyboard_layout(&self) -> Option<KeyboardLayoutInfo> {
         self.keyboard_layout.read().clone()
     }
-
     fn switch_keyboard_layout_next(&self) {
         let main_kb = self.main_keyboard_name.read().clone();
         if let Some(kb_name) = main_kb {
@@ -1565,7 +1687,7 @@ mod tests {
             .urgent_workspaces
             .insert(2);
 
-        let (workspace_changed, _, _) = backend.handle_event("workspace>>2");
+        let (workspace_changed, _, _, _) = backend.handle_event("workspace>>2");
 
         let snapshot = backend.workspace_snapshot.read();
         assert!(workspace_changed);
@@ -1602,7 +1724,7 @@ mod tests {
             layout_count: Some(2),
         });
 
-        let (_, _, keyboard_changed) = backend.handle_event("activelayout>>keyboard-a,German");
+        let (_, _, keyboard_changed, _) = backend.handle_event("activelayout>>keyboard-a,German");
 
         assert!(keyboard_changed);
         assert_eq!(

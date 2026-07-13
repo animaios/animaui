@@ -22,6 +22,7 @@ mod cpu;
 mod custom;
 mod gpu;
 mod keyboard_layout;
+pub mod launcher;
 pub mod layer_shell_popover;
 mod marquee_label;
 mod media;
@@ -76,6 +77,7 @@ pub use cpu::{CpuConfig, CpuWidget};
 pub use custom::{CustomConfig, CustomWidget};
 pub use gpu::{GpuConfig, GpuWidget};
 pub use keyboard_layout::{KeyboardLayoutConfig, KeyboardLayoutWidget};
+pub use launcher::{LauncherConfig, LauncherWidget};
 pub use memory::{MemoryConfig, MemoryWidget};
 pub use network_speed::{NetworkSpeedConfig, NetworkSpeedWidget};
 
@@ -266,6 +268,12 @@ impl WidgetFactory {
                 let taskbar = TaskbarWidget::new(cfg, output_id.map(|s| s.to_string()));
                 let root = taskbar.widget().clone().upcast::<Widget>();
                 Some(BuiltWidget::new(root, taskbar))
+            }
+            "launcher" => {
+                let cfg = LauncherConfig::from_entry(entry);
+                let launcher = LauncherWidget::new(cfg, output_id.map(|s| s.to_string()));
+                let root = launcher.widget().clone().upcast::<Widget>();
+                Some(BuiltWidget::new(root, launcher))
             }
             "tray" => {
                 let cfg = TrayConfig::from_entry(entry);
