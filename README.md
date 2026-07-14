@@ -1,22 +1,11 @@
-# VibePanel
+<img width="1536" height="1024" alt="animaui-logo" src="https://github.com/user-attachments/assets/c390d2de-7dec-429c-860d-3f4469a1a4f6" />
 
-<p align="center">
-  <a href="https://github.com/prankstr/vibepanel/stargazers"><img src="https://img.shields.io/github/stars/prankstr/vibepanel?style=for-the-badge&labelColor=101418&color=adabe0" alt="GitHub stars"></a>
-  <a href="https://github.com/prankstr/vibepanel/releases"><img src="https://img.shields.io/github/v/release/prankstr/vibepanel?style=for-the-badge&labelColor=101418&color=adabe0" alt="GitHub release"></a>
-  <a href="https://aur.archlinux.org/packages/vibepanel-bin"><img src="https://img.shields.io/aur/version/vibepanel-bin?style=for-the-badge&labelColor=101418&color=adabe0" alt="AUR version"></a>
-  <a href="https://github.com/prankstr/vibepanel/blob/main/LICENSE"><img src="https://img.shields.io/github/license/prankstr/vibepanel?style=for-the-badge&labelColor=101418&color=adabe0" alt="License"></a>
-  <br>
-  <img src="assets/screenshots/islands_bar_dark.png" alt="VibePanel" width="830">
-</p>
+## Why AnimaUI?
 
-A batteries-included Wayland panel that replaces your status bar, notification daemon, OSD and more with a single binary. Works out of the box with [Hyprland](https://github.com/hyprwm/Hyprland), [Niri](https://github.com/niri-wm/niri), [Sway](https://github.com/swaywm/sway), [MangoWC](https://github.com/mangowm/mango) and other compositors.
-
-## Why VibePanel?
-
-VibePanel is something between a simple status bar and a full desktop shell:
+AnimaUI is something between a simple status bar and a full desktop shell:
 
 - **Fast & native** – Single Rust binary with GTK4. Direct system integration, low resource usage.
-- **Batteries included** – VibePanel replaces several common components with a single binary:
+- **Batteries included** – AnimaUI replaces several common components with a single binary:
   - **Notifications** – Integrated notification center
   - **OSD** – Built-in on-screen display for volume and brightness
   - **Quick settings** – Native panel for Wi‑Fi, Bluetooth, audio, power profiles and more
@@ -24,6 +13,7 @@ VibePanel is something between a simple status bar and a full desktop shell:
 - **Modern aesthetics** – Defaults to a floating "island" design with instant hot‑reloading and features wallpaper adaptive theming that auto‑switches between light and dark.
 - **Integrated CLI** – Control volume, brightness, media playback, bar visibility, popovers and idle inhibition.
 
+<!--
 ## Demo
 
 These examples use roughly ~10–35 lines of TOML to get completely different vibes, no CSS required.
@@ -38,6 +28,7 @@ https://github.com/user-attachments/assets/fba27921-0886-4e7b-850d-b51341583693
     <td><a href="assets/screenshots/sonoma_desktop.png"><img src="assets/screenshots/sonoma_desktop.png" width="270"></a></td>
   </tr>
 </table>
+-->
 
 ## Widgets
 
@@ -61,9 +52,11 @@ https://github.com/user-attachments/assets/fba27921-0886-4e7b-850d-b51341583693
 - **Custom** - user-defined widgets (scripts, buttons, indicators)
 - **Taskbar** - open windows as clickable buttons
 
+<!--
+
 ## Quickstart
 
-1. Install VibePanel:
+1. Install AnimaUI:
 
    **Arch Linux (AUR):**
 
@@ -112,9 +105,11 @@ https://github.com/user-attachments/assets/fba27921-0886-4e7b-850d-b51341583693
 
 See the [Installation wiki](https://github.com/prankstr/vibepanel/wiki/Installation) for more information.
 
+-->
+
 ## Configuration
 
-VibePanel doesn't require a config file to run, but if you want to customize anything, create a config at `~/.config/vibepanel/config.toml`:
+AnimaUI doesn't require a config file to run, but if you want to customize anything, create a config at `~/.config/vibepanel/config.toml`:
 
 ```sh
 mkdir -p ~/.config/vibepanel
@@ -141,12 +136,14 @@ Changes hot-reload instantly. See the [Configuration wiki](https://github.com/pr
 
 ## Status
 
-VibePanel is pre-1.0 and under active development.
+AnimaUI is pre-1.0 and under active development.
 Config options and defaults may change between minor releases, check the changelog when upgrading.
 
+<!--
 I built the first version in Python but wanted to migrate to Rust for performance, portability and simply to learn Rust.
 The porting took waay too long in a language I was still learning so I've written the code with a lot of AI assistance.
-I review all code and use VibePanel daily on multiple computers.
+I review all code and use AnimaUI daily on multiple computers.
+-->
 
 ### Compatibility
 
@@ -170,7 +167,7 @@ Full documentation lives in the [wiki](https://github.com/prankstr/vibepanel/wik
 - Want a feature? [Request it](https://github.com/prankstr/vibepanel/issues)
 - Pull requests welcome
 
-If you find VibePanel useful, consider giving it a star. It helps others discover the project.
+If you find AnimaUI useful, consider giving it a star. It helps others discover the project.
 
 ## License
 
