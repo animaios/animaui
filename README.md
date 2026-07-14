@@ -1,8 +1,6 @@
 <img width="1536" height="1024" alt="animaui-logo" src="https://github.com/user-attachments/assets/c390d2de-7dec-429c-860d-3f4469a1a4f6" />
 
-## Why AnimaUI?
-
-AnimaUI is something between a simple status bar and a full desktop shell:
+### AnimaUI is something between a simple status bar and a full desktop shell:
 
 - **Fast & native** – Single Rust binary with GTK4. Direct system integration, low resource usage.
 - **Batteries included** – AnimaUI replaces several common components with a single binary:
